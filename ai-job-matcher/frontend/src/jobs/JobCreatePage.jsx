@@ -20,7 +20,7 @@ function JobCreatePage() {
 
   if (!user || user.role !== 'recruiter') {
     return (
-      <div style={{ padding: '2rem', color: 'white' }}>
+      <div className="card">
         <p>Only recruiters can post jobs.</p>
       </div>
     );
@@ -61,7 +61,7 @@ function JobCreatePage() {
   };
 
   return (
-    <div style={{ padding: '2rem', color: 'white' }}>
+    <div className="card">
       <h2>Post a New Job</h2>
       {error && <p style={{ color: 'tomato' }}>{error}</p>}
       <form onSubmit={handleSubmit} style={{ maxWidth: 600 }}>

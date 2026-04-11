@@ -25,10 +25,10 @@ function JobListPage() {
   }, [API_BASE]);
 
   return (
-    <div style={{ padding: '2rem', color: 'white' }}>
+    <div className="card">
       <h2>Job Openings</h2>
       {user?.role === 'recruiter' && (
-        <p><Link to="/jobs/new">+ Post a new job</Link></p>
+        <p><Link to="/jobs/new" className="btn btn-secondary">+ Post a new job</Link></p>
       )}
       {loading && <p>Loading...</p>}
       {error && <p style={{ color: 'tomato' }}>{error}</p>}
@@ -38,6 +38,7 @@ function JobListPage() {
         {jobs.map(job => (
           <div
             key={job._id}
+            className='card subtle'
             style={{
               border: '1px solid #333',
               padding: '1rem',

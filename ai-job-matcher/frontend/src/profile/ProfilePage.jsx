@@ -145,18 +145,23 @@ const handleExtractSkills = async () => {
 
   if (!user || user.role !== 'seeker') {
     return (
-      <div style={{ padding: '2rem', color: 'white' }}>
+      <div className="card">
         <p>Only job seekers can access this page.</p>
       </div>
     );
   }
 
   if (loading) {
-    return <div style={{ padding: '2rem', color: 'white' }}>Loading profile...</div>;
+    return (
+    <div className="card">
+      <p>Loading profile...</p>
+    </div>
+    );
   }
 
   return (
-    <div style={{ padding: '2rem', color: 'white' }}>
+    
+    <div className="card">
       <h2>Your Profile</h2>
       {error && <p style={{ color: 'tomato' }}>{error}</p>}
       {message && <p style={{ color: 'lightgreen' }}>{message}</p>}

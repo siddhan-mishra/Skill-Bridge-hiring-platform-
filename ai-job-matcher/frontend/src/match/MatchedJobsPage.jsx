@@ -31,16 +31,16 @@ function MatchedJobsPage() {
 
   if (!user || user.role !== 'seeker') {
     return (
-      <div style={{ padding: '2rem', color: 'white' }}>
+      <div className="card">
         <p>Only job seekers can view matched jobs.</p>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: '2rem', color: 'white' }}>
+    <div className="card">
       <h2>Your Matched Jobs</h2>
-      <p>
+      <p className="muted">
         Based on your profile skills. <Link to="/profile">Update profile</Link> to improve matches.
       </p>
 
@@ -55,6 +55,7 @@ function MatchedJobsPage() {
         {matches.map((m) => (
           <div
             key={m.jobId}
+            className="card subtle"
             style={{
               border: '1px solid #333',
               padding: '1rem',

@@ -1,4 +1,4 @@
-import { Routes, Route, Link, Navigate } from 'react-router-dom';
+import { Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import LoginPage from './auth/LoginPage';
 import RegisterPage from './auth/RegisterPage';
@@ -7,65 +7,146 @@ import JobCreatePage from './jobs/JobCreatePage';
 import JobListPage from './jobs/JobListPage';
 import MatchedJobsPage from './match/MatchedJobsPage';
 
+function Navbar() {
+  const { user, isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
 
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
-
-
-
-
+  return (
+    <nav className="app-nav">
+      <div className="app-nav-left">
+        <Link to="/" className="app-logo">
+          SkillBridge
+        </Link>
+        <Link to="/jobs" className="app-nav-link">
+          Jobs
+        </Link>
+        {user?.role === 'seeker' && (
+          <>
+            <Link to="/profile" className="app-nav-link">
+              Profile
+            </Link>
+            <Link to="/matches" className="app-nav-link">
+              Matches
+            </Link>
+          </>
+        )}
+        {user?.role === 'recruiter' && (
+          <Link to="/jobs/new" className="app-nav-link">
+            Post Job
+          </Link>
+        )}
+      </div>
+      <div className="app-nav-right">
+        {isAuthenticated && user ? (
+          <>
+            <span className="app-user-chip">
+              {user.name} <span className="app-role-badge">{user.role}</span>
+            </span>
+            <button className="btn btn-ghost" onClick={handleLogout}>
+              Logout
+            </button>
+          </>
+        ) : (
+          <>
+            <Link to="/login" className="app-nav-link">
+              Login
+            </Link>
+            <Link to="/register" className="btn btn-primary">
+              Register
+            </Link>
+          </>
+        )}
+      </div>
+    </nav>
+  );
+}
 
 function Home() {
   const { user } = useAuth();
   return (
-    <div style={{ padding: '2rem', color: 'white' }}>
-      <h1>🚀 AI Job Matcher</h1>
-      {user ? (
-        <>
-          <p>Logged in as {user.name} ({user.role})</p>
-          {user.role === 'seeker' && (
-            <>
-              <p><Link to="/profile">Go to your profile</Link></p>
-              <p><Link to="/matches">View matched jobs</Link></p>
-            </>
-          )}
-          {user.role === 'recruiter' && (
-            <>
-              <p><Link to="/jobs/new">Post a new job</Link></p>
-              <p><Link to="/jobs">View all jobs</Link></p>
-            </>
-          )}
+    <div className="card">
+      <h1>AI Job Matcher</h1>
+      <p className="muted">
+        Skill‑based matching and AI‑assisted resumes for fresh IT graduates.
+      </p>
 
-        </>
-      ) : (
-        <p>Please <Link to="/login">login</Link> or <Link to="/register">register</Link>.</p>
+      {!user && (
+        <p style={{ marginTop: '1rem' }}>
+          <Link to="/login" className="btn btn-primary">
+            Get started
+          </Link>
+        </p>
+      )}
+
+      {user && user.role === 'seeker' && (
+        <div className="card-grid">
+          <div className="card subtle">
+            <h2>Your profile</h2>
+            <p>Keep your skills and projects updated to improve matching.</p>
+            <Link to="/profile" className="btn btn-secondary">
+              Edit profile
+            </Link>
+          </div>
+          <div className="card subtle">
+            <h2>Matched jobs</h2>
+            <p>See jobs ranked by how well your skills fit the requirements.</p>
+            <Link to="/matches" className="btn btn-secondary">
+              View matches
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {user && user.role === 'recruiter' && (
+        <div className="card-grid">
+          <div className="card subtle">
+            <h2>Post a job</h2>
+            <p>Describe your role in natural language, then refine skills.</p>
+            <Link to="/jobs/new" className="btn btn-secondary">
+              Post job
+            </Link>
+          </div>
+          <div className="card subtle">
+            <h2>All jobs</h2>
+            <p>Manage openings and see how candidates will be matched.</p>
+            <Link to="/jobs" className="btn btn-secondary">
+              View jobs
+            </Link>
+          </div>
+        </div>
       )}
     </div>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/profile" element={<ProfilePage />} />
+      <Route path="/jobs" element={<JobListPage />} />
+      <Route path="/jobs/new" element={<JobCreatePage />} />
+      <Route path="/matches" element={<MatchedJobsPage />} />
+      <Route path="*" element={<Navigate to="/" />} />
+    </Routes>
   );
 }
 
 function App() {
   return (
     <AuthProvider>
-      <div style={{ minHeight: '100vh', background: '#121212', color: '#fff' }}>
-        <nav style={{ padding: '1rem', borderBottom: '1px solid #333' }}>
-          <Link to="/" style={{ marginRight: '1rem', color: '#fff' }}>Home</Link>
-          <Link to="/jobs" style={{ marginRight: '1rem', color: '#fff' }}>Jobs</Link>
-          <Link to="/login" style={{ marginRight: '1rem', color: '#fff' }}>Login</Link>
-          <Link to="/register" style={{ color: '#fff' }}>Register</Link>
-        </nav>
-
-
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="*" element={<Navigate to="/" />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/jobs" element={<JobListPage />} />
-          <Route path="/jobs/new" element={<JobCreatePage />} />
-          <Route path="/matches" element={<MatchedJobsPage />} />
-
-        </Routes>
+      <div className="app-root">
+        <Navbar />
+        <main className="app-main">
+          <AppRoutes />
+        </main>
       </div>
     </AuthProvider>
   );
