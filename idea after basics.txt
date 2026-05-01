@@ -1,0 +1,99 @@
+everything is working and perfectly but their are so many things
+
+such as there is no way for the recruites to contact the enlisted candidates
+in seeker make sure that jobs that are above 40 matched are only shown and in another tab where he can see all the available jobs and filter them according to pay, industry, roles, type of jpb , etc and when he/she clicks any one it will show all details
+seeker needs to check the jobs and page of job and also page of recruiter with more job listing of that recruiter if he has post multiple
+
+recruiter also need to be able to look at the seeker profile that were selected.
+
+I need resume maker from the description of the seeker and their profile or fill the description from the uploaded resume.when a new seeker logins they will be asked with 2 options either fill in information and details by themselves and then they will be asked if they want a resume to be made from that and when selected yes a resume that will be ats friendly be made. another option at the login was to upload resume and from that resume profile of the seeker will be automatically filled and for any other missing details will be later on filled by seeker.
+
+i also need the ability to delete the profile page, edit the job description later on and even delete it 
+a page for the recruiter for them to see all their job listing and if needed other recruiters too. 
+the recruiter cannot search seeker and can only check the profile of seekers that will be short listed.
+
+1. **Resume upload \& parsing**
+    - Right now, you’re mostly treating “profile text” as input; you’re not yet:
+        - Letting users upload PDF/DOCX resumes.
+        - Extracting text from them.
+        - Running that through SkillNer automatically.
+    - This is a very visible missing piece: examiners love “upload resume → parsed skills appear”.
+2. **Recruiter-side matching view**
+    - Seekers can see jobs ranked by match score.
+    - Recruiters still **don’t** see a “Top candidates for this job” list with scores and skill breakdown.
+    - For a project about “help companies hire better”, this is an obvious hole.
+3. **Semantic similarity (embeddings)**
+    - Matching today = set overlap: $\text{score} = \frac{|matchedSkills|}{|requiredSkills|} \times 100$.
+    - You *designed* for BERT/Sentence-Transformer based embeddings, but you haven’t wired that in yet.[^1]
+    - That’s your “research-ish” AI part: moving beyond keyword overlap to semantic similarity.
+4. **AI resume optimization / generation**
+    - Planned: job‑specific, ATS-friendly resumes generated from profile using an LLM.
+    
+5. **Polish and basic UX gaps**
+    - Limited editing/deleting of jobs or profiles.
+    - No sorting/filtering (“show me jobs with 70%+ match”, “only remote”, etc.).
+    - Minimal validation / error handling / toasts across the app.
+
+
+
+
+### Layer 1: Harden the current MVP
+
+These are low‑risk, high‑impact, and examiners notice them instantly:
+
+- **CRUD completeness**
+    - Ensure:
+        - Jobs can be edited and deleted by the recruiter who created them.
+        - Profiles can be updated cleanly (no duplicates, no weird states).
+- **Better UX**
+    - Add loading states, error messages, and confirmations (delete, save, etc.).
+    - Add simple filters:
+        - On matched jobs: min match score slider or “only show 60%+”.
+        - On jobs list: filter by location/type.
+- **Security / correctness**
+    - Double‑check all protected routes use JWT middleware and role checks.
+    - Sanitize / validate all inputs server-side, not just frontend.
+
+This doesn’t change the architecture; it just turns a “student demo” into a **product‑like** thing.
+
+### Layer 2: 
+
+1. **Resume upload + parsing**
+    - Add file upload on seeker side: accept PDF/DOCX.
+    - Backend route:
+        - Accept file, extract text (e.g., `pdfplumber` or `PyMuPDF` in Python, or a Node lib).
+        - Send text to SkillNer → get skills.
+        - Merge skills into Profile.
+    - UI: “Upload resume → show extracted skills, let user confirm/edit.”
+    - This instantly makes demo more impressive.
+2. **Recruiter-side matching view**
+    - New endpoint: `GET /api/match/job/:jobId`
+        - Load job, load all profiles, compute match for each candidate.
+    - New React page: “Matches for this job”
+        - Table of candidates with score, matched/missing skills.
+    - This makes the system clearly valuable **for both sides**, not just seekers.
+
+
+
+3. **Semantic similarity matching (embeddings)**
+    - Add a Python endpoint that:
+        - Uses a pre-trained Sentence-Transformer to embed:
+            - Candidate profile text (summary + skills).
+            - Job description text.
+        - Computes cosine similarity as additional score.
+    - Combine:
+        - Final score = weighted combo of overlap score + semantic similarity.
+    - This lets you say “We improved matching accuracy beyond keyword overlap.”
+4. **Minimal AI resume optimization**
+    - Start small:
+        - A textarea where you paste profile summary + job description.
+        - Backend endpoint calls LLM API with prompt: “Rewrite this as ATS-friendly resume summary tailored to this JD.”
+    - Integrate result into UI (copyable text or downloadable file).
+    - Even a *basic* version is enough to show “we use LLMs for resume optimization.”
+
+
+
+
+
+
+
