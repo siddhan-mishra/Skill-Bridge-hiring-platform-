@@ -3,7 +3,7 @@ Mongodb imp info:
 ip 49.37.113.70
 
 49.37.113.70
-dxl6piD30LWiQZ8h -- pass
+qNd4GdeHEdIyK9er -- pass
 
 siddhantmiahra2923_db_user
 
