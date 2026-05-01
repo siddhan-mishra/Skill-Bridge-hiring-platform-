@@ -3,7 +3,7 @@ to setup :
 1. pip install -r requirement.txt
 2. python -m spacy download en_core_web_sm
 
-then in cmd terminal in vs code: cd ai-job-matcher\nlp-services && venv\Scripts\activate
+then in cmd terminal in vs code: cd ai-job-matcher\nlp-service && venv\Scripts\activate
 
 cd frontend && npm run dev
 
