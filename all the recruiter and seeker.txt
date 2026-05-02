@@ -1,6 +1,0 @@
-Recruiters
-    wipro@example.com
-    password123
-
-    recruiter@example.com
-    password123
