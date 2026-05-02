@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../auth/AuthContext';
+import { Link } from 'react-router-dom';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 const EMPTY_EDU = { degree: '', institute: '', year: '' };
@@ -212,7 +213,15 @@ function ProfilePage() {
   // ─── Render ───────────────────────────────────────────────────────────
   return (
     <div className="card">
-      <h2>Your Profile</h2>
+      <p style={{ marginBottom: '1rem' }}>
+        <Link
+          to={`/profile/${user.id}`}
+          style={{ color: '#aaa', fontSize: '0.9rem', textDecoration: 'none' }}
+        >
+          ← back to my profile
+        </Link>
+      </p>
+      <h2> Edit Profile</h2>
 
       {/* Line 187: status messages */}
       {error   && <p style={{ color: 'tomato',      padding: '0.5rem', background: '#2a0000', borderRadius: '4px' }}>{error}</p>}
