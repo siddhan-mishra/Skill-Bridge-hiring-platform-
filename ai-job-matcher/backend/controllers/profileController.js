@@ -24,23 +24,3 @@ exports.upsertMyProfile = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
-
-// Line added: GET /api/profile/:userId — public profile view (any logged-in user)
-exports.getProfileByUserId = async (req, res) => {
-  try {
-    const profile = await Profile
-      .findOne({ user: req.params.userId })
-      .populate('user', 'name email role')
-      .lean();
-
-    if (!profile) {
-      return res.status(404).json({ message: 'Profile not found' });
-    }
-
-    // never expose password — populate only returns name/email/role (safe)
-    res.json(profile);
-  } catch (err) {
-    console.error('getProfileByUserId error:', err);
-    res.status(500).json({ message: 'Server error' });
-  }
-};

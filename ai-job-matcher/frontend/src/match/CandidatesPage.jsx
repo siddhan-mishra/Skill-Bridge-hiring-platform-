@@ -142,14 +142,7 @@ function CandidatesPage() {
                 <span style={{ color: '#555', fontSize: '0.85rem', marginRight: '0.5rem' }}>
                   #{idx + 1}
                 </span>
-                <Link
-                    to={`/profile/${c.userId}`}
-                    style={{ color: 'white', textDecoration: 'none', fontSize: '1.05rem', fontWeight: 'bold'  }}
-                    onMouseEnter={e => e.target.style.color = '#7ac'}
-                    onMouseLeave={e => e.target.style.color = 'white'}
-                  >
-                    {c.name}
-                  </Link>
+                <strong style={{ fontSize: '1.05rem' }}>{c.name}</strong>
                 {c.headline && (
                   <p style={{ color: '#aaa', fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
                     {c.headline}
