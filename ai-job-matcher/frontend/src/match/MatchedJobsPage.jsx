@@ -64,7 +64,14 @@ function MatchedJobsPage() {
             }}
           >
             <h3>
-              {m.title} – {m.company}
+              <Link
+                to={`/jobs/${m.jobId}`}
+                style={{ color: 'white', textDecoration: 'none' }}
+                onMouseEnter={e => e.target.style.textDecoration = 'underline'}
+                onMouseLeave={e => e.target.style.textDecoration = 'none'}
+              >
+                {m.title } - {m.company}
+              </Link>
             </h3>
             <p>
               {m.location && `${m.location} • `}{m.jobType}
@@ -93,6 +100,22 @@ function MatchedJobsPage() {
                 ? m.description.slice(0, 200) + '...'
                 : m.description}
             </p>
+            {/* Line 85: View full job button */}
+            <div style={{ marginTop: '0.75rem' }}>
+              <Link
+                to={`/jobs/${m.jobId}`}
+                style={{
+                  padding: '0.4rem 0.9rem',
+                  background: '#2a4a6a',
+                  color: 'white',
+                  borderRadius: '4px',
+                  textDecoration: 'none',
+                  fontSize: '0.85rem',
+                }}
+              >
+                View Full Job →
+              </Link>
+            </div>
           </div>
         ))}
       </div>

@@ -6,6 +6,10 @@ import ProfilePage from './profile/ProfilePage';
 import JobCreatePage from './jobs/JobCreatePage';
 import JobListPage from './jobs/JobListPage';
 import MatchedJobsPage from './match/MatchedJobsPage';
+import JobDetailPage from './jobs/JobDetailPage';
+import JobEditPage from './jobs/JobEditPage';
+import RecruiterJobsPage from './jobs/RecruiterJobsPage';
+import CandidatesPage    from './match/CandidatesPage';
 
 function Navbar() {
   const { user, isAuthenticated, logout } = useAuth();
@@ -36,9 +40,14 @@ function Navbar() {
           </>
         )}
         {user?.role === 'recruiter' && (
-          <Link to="/jobs/new" className="app-nav-link">
-            Post Job
-          </Link>
+          <>
+            <Link to="/recruiter/jobs" className="app-nav-link">
+              My Jobs
+            </Link>
+            <Link to="/recruiter/jobs/:jobId/candidates" className="app-nav-link">
+              Post Job
+            </Link>
+          </>
         )}
       </div>
       <div className="app-nav-right">
@@ -133,6 +142,10 @@ function AppRoutes() {
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/jobs" element={<JobListPage />} />
       <Route path="/jobs/new" element={<JobCreatePage />} />
+      <Route path="/jobs/:id" element={<JobDetailPage />} />
+      <Route path="/jobs/:id/edit" element={<JobEditPage />} />
+      <Route path="/recruiter/jobs" element={<RecruiterJobsPage />} />
+      <Route path="/recruiter/jobs/:jobId/candidates" element={<CandidatesPage />} />
       <Route path="/matches" element={<MatchedJobsPage />} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
