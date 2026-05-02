@@ -8,14 +8,4 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'ai-job-matcher/resumes',
-    allowed_formats: ['pdf', 'doc', 'docx'],
-    resource_type: 'raw',   // required for non-image files
-  },
-});
-
-
-module.exports = { cloudinary, storage };
+module.exports = { cloudinary };
