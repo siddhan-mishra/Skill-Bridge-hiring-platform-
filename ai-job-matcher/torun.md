@@ -7,6 +7,8 @@ if downloaded node then good
 then in cmd
 
 npm install mongodb
+cd ai-job-matcher/backend
+npm install multer cloudinary multer-storage-cloudinary
 
 then in cmd terminal in vs code: cd ai-job-matcher\nlp-service && venv\Scripts\activate
 

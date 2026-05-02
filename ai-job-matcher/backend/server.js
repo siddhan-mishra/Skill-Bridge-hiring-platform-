@@ -17,6 +17,7 @@ app.use('/api/profile', require('./routes/profileRoutes'));
 app.use('/api/jobs', require('./routes/jobRoutes'));
 app.use('/api/nlp', require('./routes/nlpRoutes'));
 app.use('/api/match', require('./routes/matchRoutes'));
+app.use('/api/upload', require('./routes/uploadRoutes'));
 
 
 
