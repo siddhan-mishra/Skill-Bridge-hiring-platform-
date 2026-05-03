@@ -4,3 +4,15 @@ Recruiters
 
     recruiter@example.com
     password123
+
+    skill@example.com
+    password123
+
+
+
+seekers
+    mayanku@example.com
+    password123
+
+    shipra@example.com
+    Shipra123@
