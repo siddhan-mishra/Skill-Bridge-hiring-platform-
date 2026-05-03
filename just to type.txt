@@ -1,0 +1,3 @@
+also include that recruiter can only see candidates that have applied for the position and they can select which applicant to select and those applicant will be sent a notification and list of all the candidates that have been notified to or selected can be seen for the recruiter. similarily when the seeker applys for the position and they get selected in their page will be a list of jobs that have selected them will be given and a way to contact them should be there are well
+
+make the homepage better or like a dashbord for the respective user seeker and recruiter 
