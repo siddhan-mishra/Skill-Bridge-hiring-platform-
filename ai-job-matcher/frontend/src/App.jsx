@@ -13,6 +13,7 @@ import RecruiterJobsPage from './jobs/RecruiterJobsPage';
 import CandidatesPage from './match/CandidatesPage';
 import SeekerDashboard from './match/SeekerDashboard';
 import RecruiterDashboard from './match/RecruiterDashboard';
+import AllApplicationsPage from './match/AllApplicationsPage';
 import ApplicationsPage from './match/ApplicationsPage';
 import HomePage from './HomePage';
 
@@ -37,9 +38,10 @@ function Navbar() {
 
         {user?.role === 'recruiter' && (
           <>
-            <Link to="/recruiter/dashboard" className="app-nav-link">Dashboard</Link>
-            <Link to="/recruiter/jobs"      className="app-nav-link">My Jobs</Link>
-            <Link to="/jobs/new"            className="app-nav-link">Post Job</Link>
+            <Link to="/recruiter/dashboard"    className="app-nav-link">Dashboard</Link>
+            <Link to="/recruiter/jobs"         className="app-nav-link">My Jobs</Link>
+            <Link to="/recruiter/applications" className="app-nav-link">Applications</Link>
+            <Link to="/jobs/new"               className="app-nav-link">Post Job</Link>
           </>
         )}
       </div>
@@ -82,6 +84,7 @@ function AppRoutes() {
       <Route path="/dashboard"                           element={<SeekerDashboard />} />
       <Route path="/applications"                        element={<ApplicationsPage />} />
       <Route path="/recruiter/dashboard"                 element={<RecruiterDashboard />} />
+      <Route path="/recruiter/applications"              element={<AllApplicationsPage />} />
       <Route path="/jobs"                                element={<JobListPage />} />
       <Route path="/jobs/new"                            element={<JobCreatePage />} />
       <Route path="/jobs/:id"                            element={<JobDetailPage />} />
