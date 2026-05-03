@@ -38,12 +38,15 @@ if not _key:
     raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
 gemini = genai_new.Client(api_key=_key)
 
-# Model fallback chain — if one is rate-limited, try the next
-# gemini-1.5-flash has a SEPARATE free-tier quota from gemini-2.0-flash
+# ── Gemini model fallback chain (May 2026 current models) ────────────────────
+# gemini-2.0-flash        : primary — fast, free tier, 1M context
+# gemini-2.0-flash-lite   : lighter version, most generous RPM quota
+# gemini-2.5-flash-preview: most capable, use when others are exhausted
+# REMOVED: gemini-1.5-flash, gemini-1.5-flash-8b (deprecated, return 404)
 GEMINI_MODELS = [
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",   # smallest/fastest, most generous quota
+    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash-preview-05-20",
 ]
 
 
@@ -53,15 +56,19 @@ class TextIn(BaseModel):
 class SkillsOut(BaseModel):
     skills: list[str]
 
+class SkillSuggestIn(BaseModel):
+    title: str = ""
+    description: str = ""
+
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "models": GEMINI_MODELS}
 
 
+# ── SkillNer extraction (fast, no LLM) ───────────────────────────────────────
 @app.post("/extract-skills", response_model=SkillsOut)
 def extract_skills(payload: TextIn):
-    """SkillNer on short text only (headline + summary). Fast."""
     doc = skill_extractor.annotate(payload.text)
     results = doc.get("results", {})
     skills = set()
@@ -74,7 +81,7 @@ def extract_skills(payload: TextIn):
     return {"skills": sorted(skills)}
 
 
-# ── PDF text extraction ──────────────────────────────────────────────────────
+# ── PDF text extraction ───────────────────────────────────────────────────────
 def pdf_to_text(data: bytes) -> str:
     text = ""
     with pdfplumber.open(io.BytesIO(data)) as pdf:
@@ -85,7 +92,7 @@ def pdf_to_text(data: bytes) -> str:
     return text.strip()
 
 
-# ── Regex contact extractors ─────────────────────────────────────────────────
+# ── Regex contact extractors ──────────────────────────────────────────────────
 def rx_email(t):     m = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', t);                 return m.group(0) if m else None
 def rx_phone(t):     m = re.search(r'(\+?\d[\d\s\-().]{7,}\d)', t);              return m.group(0).strip() if m else None
 def rx_linkedin(t):  m = re.search(r'linkedin\.com/in/[\w\-]+', t, re.I);         return "https://" + m.group(0) if m else None
@@ -95,12 +102,8 @@ def rx_portfolio(t):
     return hits[0] if hits else None
 
 
-# ── Gemini call with model fallback + retry on 429 ───────────────────────────
+# ── Gemini call with model fallback + retry on 429 ────────────────────────────
 def call_gemini(prompt: str) -> str:
-    """
-    Try each model in GEMINI_MODELS. On 429, wait the retry-after hint then try
-    the next model. Returns raw text or raises if all models fail.
-    """
     last_err = None
     for model in GEMINI_MODELS:
         try:
@@ -112,23 +115,20 @@ def call_gemini(prompt: str) -> str:
             msg = str(ex)
             last_err = ex
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                # Extract retry-after hint if present, wait at most 10s then try next model
                 delay = 5
                 m = re.search(r'retryDelay.*?(\d+)s', msg)
                 if m:
                     delay = min(int(m.group(1)), 10)
                 print(f"[gemini] 429 on {model}, waiting {delay}s then trying next model")
                 time.sleep(delay)
-                continue  # try next model
+                continue
             else:
-                # Non-rate-limit error — still try next model
                 print(f"[gemini] error on {model}: {ex}")
                 continue
     raise last_err or RuntimeError("All Gemini models failed")
 
 
 def strip_fences(raw: str) -> str:
-    """Strip markdown code fences Gemini sometimes wraps around JSON."""
     if "```" not in raw:
         return raw
     parts = raw.split("```")
@@ -136,12 +136,63 @@ def strip_fences(raw: str) -> str:
         p = part.strip()
         if p.startswith("json"):
             p = p[4:].strip()
-        if p.startswith("{"):
+        if p.startswith("{") or p.startswith("["):
             return p
     return raw
 
 
-# ── /parse-resume: Gemini ONLY — SkillNer not used (too slow on full PDF) ────
+# ── /suggest-skills : AI skill chip suggestions for job posting form ──────────
+# Step 3 (job form) calls this; Step 2 (SBERT matching) will also enrich using
+# the expanded skill set returned here.
+@app.post("/suggest-skills")
+async def suggest_skills(payload: SkillSuggestIn):
+    """
+    Given a job title and/or description, return a list of relevant skills
+    the recruiter should add. Used for AI chip suggestions on the job form.
+    Also normalises MERN-style shorthand into component skills.
+    """
+    if not payload.title and not payload.description:
+        return {"skills": []}
+
+    PROMPT = f"""You are an expert technical recruiter with deep knowledge of the IT and software industry.
+
+Given the job title and description below, return a JSON array of the most relevant technical and soft skills
+required for this role. Follow these rules strictly:
+
+1. Return ONLY a raw JSON array of strings. No markdown, no explanation.
+2. Expand shorthand: "MERN" becomes ["MongoDB", "Express.js", "React", "Node.js"] as separate items.
+3. Include both hard skills (technologies, frameworks, languages) and soft skills (e.g. "Problem Solving").
+4. Normalize capitalization: "JavaScript" not "javascript", "Node.js" not "nodejs".
+5. Return 15-25 skills maximum, ordered by importance.
+6. Do not include generic terms like "Computer Science" or "Software Development".
+
+Job Title: {payload.title}
+Job Description: {payload.description[:3000]}
+
+Return ONLY the JSON array:"""
+
+    try:
+        raw = call_gemini(PROMPT)
+        raw = strip_fences(raw)
+        # Handle both array and object response
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            # Sometimes Gemini wraps in {"skills": [...]}
+            skills = parsed.get("skills", [])
+        elif isinstance(parsed, list):
+            skills = parsed
+        else:
+            skills = []
+        # Sanitize: strings only, max 50 chars each
+        skills = [str(s).strip()[:50] for s in skills if s]
+        print(f"[suggest-skills] title='{payload.title}' returned {len(skills)} skills")
+        return {"skills": skills}
+    except Exception as ex:
+        print(f"[suggest-skills] error: {ex}")
+        return {"skills": [], "error": str(ex)}
+
+
+# ── /parse-resume : Gemini ONLY (SkillNer too slow on full PDF) ───────────────
 @app.post("/parse-resume")
 async def parse_resume(file: UploadFile = File(...)):
     content = await file.read()
@@ -150,7 +201,6 @@ async def parse_resume(file: UploadFile = File(...)):
     if not text:
         return {"error": "No text extracted — PDF may be image-based (scanned)."}
 
-    # Instant regex extraction — no AI needed for contacts
     email     = rx_email(text)
     phone     = rx_phone(text)
     linkedin  = rx_linkedin(text)
@@ -229,13 +279,11 @@ RESUME TEXT:
         raw = call_gemini(PROMPT)
         raw = strip_fences(raw)
         parsed = json.loads(raw)
-        print(f"[parse-resume] OK name={parsed.get('fullName')} skills={len(parsed.get('skills', []))} work={len(parsed.get('workHistory', []))}")
+        print(f"[parse-resume] OK name={parsed.get('fullName')} skills={len(parsed.get('skills', []))}")
     except json.JSONDecodeError as je:
         print(f"[parse-resume] JSON parse error: {je}")
-        parsed = {}
     except Exception as ex:
         print(f"[parse-resume] All models failed: {ex}")
-        parsed = {}
 
     return {
         "fullName":       parsed.get("fullName"),

@@ -1,6 +1,10 @@
 const Job         = require('../models/Job');
 const Application = require('../models/Application');
+const axios       = require('axios');
 
+const NLP_BASE = process.env.NLP_SERVICE_URL || 'http://127.0.0.1:8000';
+
+// ── Create Job ─────────────────────────────────────────────────────────────
 exports.createJob = async (req, res) => {
   try {
     if (req.user.role !== 'recruiter') {
@@ -8,19 +12,45 @@ exports.createJob = async (req, res) => {
     }
     const job = await Job.create({
       recruiter: req.user._id,
+      source: 'internal',
       ...req.body,
     });
     res.status(201).json(job);
   } catch (err) {
     console.error('createJob error:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', detail: err.message });
   }
 };
 
-// getAllJobs — alias for listJobs (public, all jobs)
+// ── List / Search Jobs (public) ────────────────────────────────────────────
 exports.getAllJobs = async (req, res) => {
   try {
-    const jobs = await Job.find().populate('recruiter', 'name email').sort({ createdAt: -1 });
+    const {
+      q,          // text search
+      workMode,
+      jobType,
+      location,
+      minSalary,
+      maxSalary,
+      source = 'internal',
+    } = req.query;
+
+    const filter = { isActive: true, source };
+
+    if (q) {
+      filter.$text = { $search: q };
+    }
+    if (workMode)   filter.workMode = workMode;
+    if (jobType)    filter.jobType  = jobType;
+    if (location)   filter.location = new RegExp(location, 'i');
+    if (minSalary)  filter.salaryMax = { $gte: Number(minSalary) };
+    if (maxSalary)  filter.salaryMin = { $lte: Number(maxSalary) };
+
+    const jobs = await Job.find(filter)
+      .populate('recruiter', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.json(jobs);
   } catch (err) {
     console.error('getAllJobs error:', err);
@@ -28,9 +58,9 @@ exports.getAllJobs = async (req, res) => {
   }
 };
 
-// listJobs — kept for backward compat
 exports.listJobs = exports.getAllJobs;
 
+// ── Get Single Job ─────────────────────────────────────────────────────────
 exports.getJobById = async (req, res) => {
   try {
     const job = await Job.findById(req.params.id).populate('recruiter', 'name email');
@@ -41,6 +71,7 @@ exports.getJobById = async (req, res) => {
   }
 };
 
+// ── Update Job ─────────────────────────────────────────────────────────────
 exports.updateJob = async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
@@ -58,6 +89,7 @@ exports.updateJob = async (req, res) => {
   }
 };
 
+// ── Delete Job ─────────────────────────────────────────────────────────────
 exports.deleteJob = async (req, res) => {
   try {
     const job = await Job.findById(req.params.id);
@@ -72,7 +104,7 @@ exports.deleteJob = async (req, res) => {
   }
 };
 
-// GET /api/jobs/my — recruiter's own jobs with live application counts
+// ── Recruiter's Own Jobs with Application Counts ───────────────────────────
 exports.getMyJobs = async (req, res) => {
   try {
     if (req.user.role !== 'recruiter') {
@@ -88,6 +120,7 @@ exports.getMyJobs = async (req, res) => {
           _id: '$job',
           total:       { $sum: 1 },
           shortlisted: { $sum: { $cond: [{ $eq: ['$status', 'shortlisted'] }, 1, 0] } },
+          rejected:    { $sum: { $cond: [{ $eq: ['$status', 'rejected']    }, 1, 0] } },
         },
       },
     ]);
@@ -99,11 +132,38 @@ exports.getMyJobs = async (req, res) => {
       ...j,
       appCount:         countMap[j._id.toString()]?.total       || 0,
       shortlistedCount: countMap[j._id.toString()]?.shortlisted || 0,
+      rejectedCount:    countMap[j._id.toString()]?.rejected    || 0,
     }));
 
     res.json(enriched);
   } catch (err) {
     console.error('getMyJobs error:', err);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ── AI Skill Suggestions (proxies to NLP service) ──────────────────────────
+// POST /api/jobs/suggest-skills
+// Body: { title: string, description: string }
+// Returns: { skills: string[] }  — recruiter clicks chips to add to job form
+exports.suggestSkills = async (req, res) => {
+  try {
+    const { title = '', description = '' } = req.body;
+    if (!title && !description) {
+      return res.status(400).json({ message: 'Provide title or description' });
+    }
+
+    // Call NLP service suggest-skills endpoint
+    const nlpRes = await axios.post(
+      `${NLP_BASE}/suggest-skills`,
+      { title, description },
+      { timeout: 15000 }
+    );
+
+    return res.json(nlpRes.data);  // { skills: [...] }
+  } catch (err) {
+    console.error('suggestSkills proxy error:', err.message);
+    // Graceful degradation — return empty so frontend doesn't crash
+    return res.json({ skills: [], error: 'NLP service unavailable' });
   }
 };
