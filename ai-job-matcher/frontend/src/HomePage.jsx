@@ -1,150 +1,112 @@
-// HomePage.jsx — Modern dark UI matching the app design system
 import { Link } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
+
+const FEATURES = [
+  { icon: '🤝', title: 'Skill-Based Matching', desc: 'Our algorithm ranks jobs by how well your actual skills fit — not keywords, not guesswork.' },
+  { icon: '📄', title: 'Smart Resume Parser', desc: 'Upload your PDF resume and auto-fill your entire profile in seconds using AI.' },
+  { icon: '📬', title: 'Real-Time Notifications', desc: 'Get email alerts the moment a recruiter reviews or shortlists your application.' },
+  { icon: '🏢', title: 'Recruiter Dashboard', desc: 'Post jobs, browse AI-ranked candidates, and manage your entire pipeline in one place.' },
+];
+
+const STATS = [
+  { value: 'AI', label: 'Powered Matching' },
+  { value: '100%', label: 'Free for Seekers' },
+  { value: '4', label: 'Core Features Live' },
+  { value: '∞', label: 'Possibilities' },
+];
 
 export default function HomePage() {
   const { user } = useAuth();
 
-  const features = [
-    { icon: '🤖', title: 'AI Job Matching', desc: 'Upload your resume and get matched to the best jobs using Gemini AI — no keyword guessing.' },
-    { icon: '📄', title: 'Resume Parser', desc: 'Paste your PDF and watch your profile fill itself — name, skills, work history, projects — all auto-extracted.' },
-    { icon: '🎯', title: 'Skill Analysis', desc: 'NLP scans your headline and summary to identify hidden skills and surface them automatically.' },
-    { icon: '🏢', title: 'Recruiter Dashboard', desc: 'Post jobs, browse ranked candidates, and get instant match scores — built for speed.' },
-    { icon: '📊', title: 'Match Scoring', desc: 'Every job match comes with a transparent score breakdown — see exactly why you match or don\'t.' },
-    { icon: '🔒', title: 'Privacy First', desc: 'Your data stays yours. Control what recruiters see on your public profile at all times.' },
-  ];
-
-  const steps = [
-    { n: '01', title: 'Create Account', desc: 'Sign up as a job seeker or recruiter in under 30 seconds.' },
-    { n: '02', title: 'Upload Resume', desc: 'AI parses your PDF and fills your entire profile automatically.' },
-    { n: '03', title: 'Get Matched', desc: 'Our engine scores every job against your profile in real time.' },
-    { n: '04', title: 'Apply & Connect', desc: 'Apply with one click. Recruiters see your AI-ranked profile first.' },
-  ];
-
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto', paddingBottom: '5rem' }}>
+    <div style={{ width: '100%', maxWidth: 960 }}>
 
-      {/* ═══ HERO ══════════════════════════════════════════════════════════════ */}
-      <div style={{
-        textAlign: 'center',
-        padding: '4rem 1rem 3rem',
-        background: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(90,176,224,0.12) 0%, transparent 70%)',
-        borderRadius: '0 0 20px 20px',
-        marginBottom: '1rem',
-      }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.25rem 0.9rem', background: 'rgba(90,176,224,0.08)', border: '1px solid rgba(90,176,224,0.2)', borderRadius: '20px', fontSize: '0.75rem', color: '#5ab0e0', marginBottom: '1.5rem', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-          ✦ AI-Powered Hiring Platform
-        </div>
-        <h1 style={{ fontSize: 'clamp(2rem,6vw,3.2rem)', fontWeight: 800, color: '#eee', margin: '0 0 1rem', lineHeight: 1.2 }}>
-          Find the right job.<br />
-          <span style={{ background: 'linear-gradient(90deg,#5ab0e0,#7ac,#6bcb77)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Not just any job.</span>
-        </h1>
-        <p style={{ color: '#666', fontSize: '1.05rem', maxWidth: 560, margin: '0 auto 2rem', lineHeight: 1.75 }}>
-          SkillBridge uses AI to read your resume, extract your skills, and match you to jobs that actually fit — in seconds.
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-          {user ? (
-            <>
-              <Link to={user.role === 'seeker' ? '/profile/edit' : '/employer/dashboard'} style={btn.primary}>
-                {user.role === 'seeker' ? '→ My Profile' : '→ Dashboard'}
-              </Link>
-              <Link to="/jobs" style={btn.secondary}>Browse Jobs</Link>
-            </>
-          ) : (
-            <>
-              <Link to="/register" style={btn.primary}>Get Started Free</Link>
-              <Link to="/login" style={btn.secondary}>Sign In</Link>
-            </>
+      {/* ── Hero ── */}
+      <div style={{ textAlign: 'center', padding: '3.5rem 1rem 2.5rem', position: 'relative' }}>
+        {/* Glow orb behind title */}
+        <div style={{ position: 'absolute', top: '30%', left: '50%', transform: 'translate(-50%,-50%)', width: 400, height: 300, background: 'radial-gradient(ellipse, rgba(99,102,241,0.18) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
+
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <div style={{ display: 'inline-block', padding: '0.3rem 0.9rem', background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '999px', fontSize: '0.78rem', color: '#818cf8', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '1.5rem' }}>
+            🚀 AI-Powered Job Matching Platform
+          </div>
+
+          <h1 style={{ fontSize: 'clamp(2rem, 5vw, 3.2rem)', fontWeight: 800, lineHeight: 1.15, margin: '0 0 1.2rem', letterSpacing: '-0.02em' }}>
+            Find jobs that <span style={{ background: 'linear-gradient(135deg, #6366f1, #818cf8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>actually</span> match
+            <br />your skills
+          </h1>
+
+          <p style={{ fontSize: '1.1rem', color: '#9ca3af', maxWidth: 520, margin: '0 auto 2rem', lineHeight: 1.7 }}>
+            SkillBridge connects fresh IT graduates with the right opportunities using AI-powered skill matching — no spam, no irrelevant listings.
+          </p>
+
+          {!user && (
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link to="/register" className="btn btn-primary" style={{ padding: '0.65rem 1.8rem', fontSize: '0.95rem', fontWeight: 600 }}>Get started free →</Link>
+              <Link to="/jobs" className="btn btn-ghost" style={{ padding: '0.65rem 1.5rem', fontSize: '0.95rem' }}>Browse jobs</Link>
+            </div>
+          )}
+
+          {user?.role === 'seeker' && (
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link to="/dashboard" className="btn btn-primary" style={{ padding: '0.65rem 1.8rem', fontSize: '0.95rem', fontWeight: 600 }}>My Dashboard →</Link>
+              <Link to="/matches" className="btn btn-ghost" style={{ padding: '0.65rem 1.5rem', fontSize: '0.95rem' }}>View Matches</Link>
+            </div>
+          )}
+
+          {user?.role === 'recruiter' && (
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link to="/jobs/new" className="btn btn-primary" style={{ padding: '0.65rem 1.8rem', fontSize: '0.95rem', fontWeight: 600 }}>Post a Job →</Link>
+              <Link to="/recruiter/jobs" className="btn btn-ghost" style={{ padding: '0.65rem 1.5rem', fontSize: '0.95rem' }}>My Jobs</Link>
+            </div>
           )}
         </div>
-
-        {/* Stats strip */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '2.5rem', marginTop: '3rem', flexWrap: 'wrap' }}>
-          {[['AI-Powered', 'Matching'], ['Resume', 'Auto-fill'], ['Real-time', 'Scoring']].map(([a, b], i) => (
-            <div key={i} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#5ab0e0' }}>{a}</div>
-              <div style={{ fontSize: '0.75rem', color: '#555', marginTop: '0.1rem' }}>{b}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
-      {/* ═══ HOW IT WORKS ══════════════════════════════════════════════════════ */}
-      <div style={{ marginBottom: '1rem' }}>
-        <SectionLabel>How It Works</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '1px', background: '#111', border: '1px solid #1e1e1e', borderRadius: '12px', overflow: 'hidden' }}>
-          {steps.map((s, i) => (
-            <div key={i} style={{ padding: '1.5rem 1.25rem', background: '#0a0a0a', position: 'relative' }}>
-              <div style={{ fontSize: '2rem', fontWeight: 800, color: 'rgba(90,176,224,0.12)', fontFamily: 'monospace', marginBottom: '0.5rem' }}>{s.n}</div>
-              <div style={{ fontWeight: 600, color: '#ddd', fontSize: '0.92rem', marginBottom: '0.35rem' }}>{s.title}</div>
-              <div style={{ color: '#555', fontSize: '0.82rem', lineHeight: 1.6 }}>{s.desc}</div>
-              {i < steps.length - 1 && (
-                <div style={{ position: 'absolute', right: -1, top: '50%', transform: 'translateY(-50%)', color: '#1e1e1e', fontSize: '1.2rem', zIndex: 1 }}>›</div>
-              )}
-            </div>
-          ))}
-        </div>
+      {/* ── Stats bar ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '1px', background: '#1f2937', border: '1px solid #1f2937', borderRadius: '12px', overflow: 'hidden', marginBottom: '3rem' }}>
+        {STATS.map((s, i) => (
+          <div key={i} style={{ background: '#070d1a', padding: '1.25rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#818cf8' }}>{s.value}</div>
+            <div style={{ fontSize: '0.74rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '0.2rem' }}>{s.label}</div>
+          </div>
+        ))}
       </div>
 
-      {/* ═══ FEATURES ══════════════════════════════════════════════════════════ */}
-      <div style={{ marginBottom: '1rem' }}>
-        <SectionLabel>Platform Features</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: '0.75rem' }}>
-          {features.map((f, i) => (
-            <div key={i} style={{
-              background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '10px',
-              padding: '1.25rem', transition: 'border-color 0.2s',
-            }}
-              onMouseEnter={e => e.currentTarget.style.borderColor = '#1a3a5a'}
-              onMouseLeave={e => e.currentTarget.style.borderColor = '#1a1a1a'}
+      {/* ── Features grid ── */}
+      <div style={{ marginBottom: '3rem' }}>
+        <h2 style={{ textAlign: 'center', fontSize: '1.5rem', fontWeight: 700, marginBottom: '1.75rem', color: '#e5e7eb' }}>Everything you need</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '1rem' }}>
+          {FEATURES.map((f, i) => (
+            <div key={i} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '12px', padding: '1.4rem', transition: 'border-color 0.2s, transform 0.2s' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#374151'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#1f2937'; e.currentTarget.style.transform = 'none'; }}
             >
-              <div style={{ fontSize: '1.5rem', marginBottom: '0.6rem' }}>{f.icon}</div>
-              <div style={{ fontWeight: 600, color: '#ddd', fontSize: '0.9rem', marginBottom: '0.35rem' }}>{f.title}</div>
-              <div style={{ color: '#555', fontSize: '0.82rem', lineHeight: 1.65 }}>{f.desc}</div>
+              <div style={{ fontSize: '1.6rem', marginBottom: '0.75rem' }}>{f.icon}</div>
+              <div style={{ fontWeight: 600, color: '#e5e7eb', marginBottom: '0.4rem', fontSize: '0.95rem' }}>{f.title}</div>
+              <div style={{ color: '#6b7280', fontSize: '0.84rem', lineHeight: 1.6 }}>{f.desc}</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ═══ CTA BANNER ════════════════════════════════════════════════════════ */}
+      {/* ── Dual CTA (only for guests) ── */}
       {!user && (
-        <div style={{
-          background: 'linear-gradient(135deg, #080f1a 0%, #0a1a10 100%)',
-          border: '1px solid #1a3a2a', borderRadius: '12px',
-          padding: '2.5rem', textAlign: 'center',
-        }}>
-          <h2 style={{ margin: '0 0 0.6rem', color: '#eee', fontSize: '1.4rem', fontWeight: 700 }}>Ready to get matched?</h2>
-          <p style={{ color: '#555', fontSize: '0.9rem', margin: '0 0 1.5rem' }}>Create your profile in minutes. Let AI do the rest.</p>
-          <Link to="/register" style={{ ...btn.primary, fontSize: '0.9rem' }}>Create Free Account →</Link>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
+          <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(99,102,241,0.05))', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '12px', padding: '1.75rem' }}>
+            <div style={{ fontSize: '0.72rem', color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>For Job Seekers</div>
+            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.1rem', color: '#e5e7eb' }}>Land your dream job</h3>
+            <p style={{ color: '#6b7280', fontSize: '0.85rem', lineHeight: 1.6, marginBottom: '1rem' }}>Upload your resume, build your profile, and let AI match you with jobs that actually fit your skills.</p>
+            <Link to="/register" className="btn btn-secondary" style={{ fontSize: '0.85rem' }}>Create free account →</Link>
+          </div>
+          <div style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.03))', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '12px', padding: '1.75rem' }}>
+            <div style={{ fontSize: '0.72rem', color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>For Recruiters</div>
+            <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.1rem', color: '#e5e7eb' }}>Find the right candidate</h3>
+            <p style={{ color: '#6b7280', fontSize: '0.85rem', lineHeight: 1.6, marginBottom: '1rem' }}>Post your job, let our AI rank every candidate by skill match. No noise, no irrelevant applications.</p>
+            <Link to="/register" className="btn" style={{ fontSize: '0.85rem', background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}>Post a job →</Link>
+          </div>
         </div>
       )}
-
     </div>
   );
 }
-
-function SectionLabel({ children }) {
-  return (
-    <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
-      <span style={{ fontSize: '0.7rem', color: '#5ab0e0', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{children}</span>
-      <div style={{ width: 32, height: 1, background: 'linear-gradient(90deg,transparent,#5ab0e0,transparent)', margin: '0.4rem auto 0' }} />
-    </div>
-  );
-}
-
-const btn = {
-  primary: {
-    display: 'inline-block', padding: '0.6rem 1.6rem',
-    background: 'linear-gradient(135deg,#0e3a5a,#0a2a44)',
-    color: '#5ab0e0', border: '1px solid #1a5a7a',
-    borderRadius: '8px', textDecoration: 'none',
-    fontWeight: 700, fontSize: '0.88rem',
-  },
-  secondary: {
-    display: 'inline-block', padding: '0.6rem 1.6rem',
-    background: 'none', color: '#666',
-    border: '1px solid #1e1e1e',
-    borderRadius: '8px', textDecoration: 'none',
-    fontWeight: 600, fontSize: '0.88rem',
-  },
-};
