@@ -19,6 +19,7 @@ app.use('/api/nlp',          require('./routes/nlpRoutes'));
 app.use('/api/match',        require('./routes/matchRoutes'));
 app.use('/api/upload',       require('./routes/uploadRoutes'));
 app.use('/api/applications', require('./routes/applicationRoutes'));
+app.use('/api/stats',        require('./routes/statsRoutes'));
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Backend is LIVE!', timestamp: new Date() });

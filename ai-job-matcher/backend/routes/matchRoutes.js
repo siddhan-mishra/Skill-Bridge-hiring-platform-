@@ -6,11 +6,11 @@ const {
   getCandidatesForJob,
 } = require('../controllers/matchController');
 
-// seeker: ranked jobs
-router.get('/my-jobs', protect, getMatchesForCurrentSeeker);
+// Seeker: ranked jobs — support both legacy route and new alias
+router.get('/my-jobs', protect, getMatchesForCurrentSeeker);   // legacy
+router.get('/matches', protect, getMatchesForCurrentSeeker);   // new alias used by SeekerDashboard
 
-// recruiter: ranked candidates for a specific job
-// Line 12: GET /api/match/job/:jobId/candidates
+// Recruiter: ranked candidates for a specific job
 router.get('/job/:jobId/candidates', protect, getCandidatesForJob);
 
 module.exports = router;

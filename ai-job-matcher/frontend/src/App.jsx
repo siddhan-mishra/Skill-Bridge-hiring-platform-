@@ -12,6 +12,7 @@ import JobEditPage from './jobs/JobEditPage';
 import RecruiterJobsPage from './jobs/RecruiterJobsPage';
 import CandidatesPage from './match/CandidatesPage';
 import SeekerDashboard from './match/SeekerDashboard';
+import RecruiterDashboard from './match/RecruiterDashboard';
 import ApplicationsPage from './match/ApplicationsPage';
 import HomePage from './HomePage';
 
@@ -27,17 +28,18 @@ function Navbar() {
 
         {user?.role === 'seeker' && (
           <>
-            <Link to="/dashboard" className="app-nav-link">Dashboard</Link>
-            <Link to="/profile" className="app-nav-link">Profile</Link>
-            <Link to="/matches" className="app-nav-link">Matches</Link>
+            <Link to="/dashboard"    className="app-nav-link">Dashboard</Link>
+            <Link to="/matches"      className="app-nav-link">Matches</Link>
             <Link to="/applications" className="app-nav-link">Applications</Link>
+            <Link to="/profile"      className="app-nav-link">Profile</Link>
           </>
         )}
 
         {user?.role === 'recruiter' && (
           <>
-            <Link to="/recruiter/jobs" className="app-nav-link">My Jobs</Link>
-            <Link to="/jobs/new" className="app-nav-link">Post Job</Link>
+            <Link to="/recruiter/dashboard" className="app-nav-link">Dashboard</Link>
+            <Link to="/recruiter/jobs"      className="app-nav-link">My Jobs</Link>
+            <Link to="/jobs/new"            className="app-nav-link">Post Job</Link>
           </>
         )}
       </div>
@@ -46,13 +48,14 @@ function Navbar() {
         {isAuthenticated && user ? (
           <>
             <span className="app-user-chip">
-              {user.name} <span className="app-role-badge">{user.role}</span>
+              {user.name}
+              <span className="app-role-badge">{user.role}</span>
             </span>
             <button className="btn btn-ghost" onClick={() => { logout(); navigate('/login'); }}>Logout</button>
           </>
         ) : (
           <>
-            <Link to="/login" className="app-nav-link">Login</Link>
+            <Link to="/login"    className="app-nav-link">Login</Link>
             <Link to="/register" className="btn btn-primary">Register</Link>
           </>
         )}
@@ -78,6 +81,7 @@ function AppRoutes() {
       <Route path="/profile"                             element={<OwnProfileRedirect />} />
       <Route path="/dashboard"                           element={<SeekerDashboard />} />
       <Route path="/applications"                        element={<ApplicationsPage />} />
+      <Route path="/recruiter/dashboard"                 element={<RecruiterDashboard />} />
       <Route path="/jobs"                                element={<JobListPage />} />
       <Route path="/jobs/new"                            element={<JobCreatePage />} />
       <Route path="/jobs/:id"                            element={<JobDetailPage />} />
