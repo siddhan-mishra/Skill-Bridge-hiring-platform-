@@ -1,215 +1,167 @@
-// CandidatesPage.jsx — ranked candidates for a recruiter's specific job
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../auth/AuthContext';
 
-function CandidatesPage() {
-  const { jobId } = useParams();               // Line 8: from /recruiter/jobs/:jobId/candidates
-  const { user, API_BASE } = useAuth();
+const STATUS_OPTS = ['pending', 'reviewed', 'shortlisted', 'rejected'];
 
-  const [data, setData]       = useState(null);  // { job, candidates[] }
+const statusStyle = (s) => {
+  const map = {
+    pending:     { bg: 'rgba(99,102,241,0.12)',  color: '#818cf8' },
+    reviewed:    { bg: 'rgba(245,158,11,0.12)',  color: '#fbbf24' },
+    shortlisted: { bg: 'rgba(16,185,129,0.12)',  color: '#34d399' },
+    rejected:    { bg: 'rgba(248,113,113,0.10)', color: '#f87171' },
+  };
+  const c = map[s] || map.pending;
+  return { padding: '0.2rem 0.7rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600, background: c.bg, color: c.color };
+};
+
+export default function CandidatesPage() {
+  const { jobId } = useParams();
+  const { API_BASE } = useAuth();
+  const token = localStorage.getItem('token');
+
+  const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-  const [minScore, setMinScore] = useState(0);   // Line 14: filter slider
+  const [error,   setError]   = useState('');
+  const [updating, setUpdating] = useState(null);  // appId being updated
+  const [tab,     setTab]     = useState('applications'); // 'applications' | 'matched'
+  const [matched, setMatched] = useState(null);
 
   useEffect(() => {
-    const fetchCandidates = async () => {
+    (async () => {
       try {
-        // Line 19: calls our new endpoint
-        const res = await axios.get(`${API_BASE}/api/match/job/${jobId}/candidates`);
-        setData(res.data);
+        const [appsRes, matchRes] = await Promise.all([
+          axios.get(`${API_BASE}/api/applications/job/${jobId}`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API_BASE}/api/match/job/${jobId}/candidates`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        setData(appsRes.data);
+        setMatched(matchRes.data);
       } catch (err) {
-        console.error(err);
-        setError(err.response?.data?.message || 'Failed to load candidates');
+        setError(err.response?.data?.message || 'Failed to load');
       } finally {
         setLoading(false);
       }
-    };
-    if (user?.role === 'recruiter') fetchCandidates();
-    else setLoading(false);
-  }, [API_BASE, jobId, user]);
+    })();
+  }, [API_BASE, jobId, token]);
 
-  if (!user || user.role !== 'recruiter') {
-    return <div className="card"><p>Only recruiters can view candidates.</p></div>;
-  }
-  if (loading) return <div className="card"><p>Loading candidates...</p></div>;
-  if (error)   return (
-    <div className="card">
-      <p style={{ color: 'tomato' }}>{error}</p>
-      <Link to="/recruiter/jobs">← Back to My Jobs</Link>
-    </div>
-  );
+  const updateStatus = async (appId, status, recruiterNote) => {
+    setUpdating(appId);
+    try {
+      await axios.patch(
+        `${API_BASE}/api/applications/${appId}/status`,
+        { status, recruiterNote },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setData(prev => ({
+        ...prev,
+        applications: prev.applications.map(a =>
+          a._id === appId ? { ...a, status, recruiterNote } : a
+        ),
+      }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Update failed');
+    } finally {
+      setUpdating(null);
+    }
+  };
 
-  const { job, candidates } = data;
+  if (loading) return <div className="card"><p>Loading candidates…</p></div>;
+  if (error)   return <div className="card"><p style={{color:'#f87171'}}>{error}</p><Link to="/recruiter/jobs">← Back</Link></div>;
 
-  // Line 44: apply minimum score filter
-  const filtered = candidates.filter(c => c.score >= minScore);
+  const { job, applications } = data;
 
-  // ── score bar colour: green > 60, yellow > 30, red otherwise ──────────
-  const scoreColor = (s) => s >= 60 ? '#4caf50' : s >= 30 ? '#ff9800' : '#f44336';
-
-  const tagStyle = (matched) => ({
-    display: 'inline-block',
-    padding: '0.2rem 0.5rem',
-    borderRadius: '12px',
-    fontSize: '0.75rem',
-    marginRight: '0.3rem',
-    marginTop: '0.25rem',
-    background: matched ? '#1a3a1a' : '#3a1a1a',
-    border: `1px solid ${matched ? '#2a6a2a' : '#6a2a2a'}`,
-    color: matched ? 'lightgreen' : '#ff8080',
-  });
+  const tagStyle = {
+    display: 'inline-block', padding: '0.15rem 0.55rem',
+    background: 'rgba(99,102,241,0.1)', color: '#818cf8',
+    border: '1px solid rgba(99,102,241,0.2)', borderRadius: '999px',
+    fontSize: '0.72rem', marginRight: '0.3rem', marginBottom: '0.3rem',
+  };
 
   return (
-    <div className="card">
+    <div className="card" style={{ maxWidth: 900 }}>
+      <Link to="/recruiter/jobs" style={{ color: '#6b7280', fontSize: '0.88rem' }}>← My Jobs</Link>
+      <h2 style={{ marginTop: '0.75rem', marginBottom: '0.25rem' }}>{job.title}</h2>
+      <p style={{ color: '#9ca3af', marginBottom: '1.25rem' }}>{job.company}</p>
 
-      {/* ── header ── */}
-      <p style={{ marginBottom: '0.5rem' }}>
-        <Link to="/recruiter/jobs" style={{ color: '#aaa', fontSize: '0.9rem', textDecoration: 'none' }}>
-          ← Back to My Jobs
-        </Link>
-      </p>
-
-      <h2 style={{ marginBottom: '0.25rem' }}>Matched Candidates</h2>
-      <p style={{ color: '#aaa', marginBottom: '1.5rem' }}>
-        Job: <strong style={{ color: 'white' }}>{job.title}</strong> at {job.company}
-        &nbsp;•&nbsp; {candidates.length} candidate{candidates.length !== 1 ? 's' : ''} found
-      </p>
-
-      {/* ── required skills for this job ── */}
-      {job.requiredSkills?.length > 0 && (
-        <div style={{ marginBottom: '1.5rem', padding: '0.75rem', background: '#161616', borderRadius: '6px', border: '1px solid #333' }}>
-          <p style={{ fontSize: '0.85rem', color: '#aaa', marginBottom: '0.5rem' }}>Required skills for this job:</p>
-          <div>
-            {job.requiredSkills.map((s, i) => (
-              <span key={i} style={{ display: 'inline-block', padding: '0.2rem 0.5rem', background: '#2a3a4a', border: '1px solid #3a5a6a', borderRadius: '12px', fontSize: '0.75rem', color: '#7ac', marginRight: '0.3rem', marginTop: '0.25rem' }}>
-                {s}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── score filter slider ── */}
-      {/* Line 92 */}
-      <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <label style={{ fontSize: '0.9rem', color: '#aaa', whiteSpace: 'nowrap' }}>
-          Min match score:
-        </label>
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={10}
-          value={minScore}
-          onChange={e => setMinScore(Number(e.target.value))}
-          style={{ flex: 1 }}
-        />
-        <span style={{
-          minWidth: '48px',
-          textAlign: 'center',
-          fontWeight: 'bold',
-          color: scoreColor(minScore),
-          fontSize: '1rem',
-        }}>
-          {minScore}%
-        </span>
-      </div>
-
-      {filtered.length === 0 && (
-        <p style={{ color: '#aaa', textAlign: 'center', padding: '2rem' }}>
-          No candidates match {minScore}%+ score. Try lowering the filter.
-        </p>
-      )}
-
-      {/* ── candidate cards ── */}
-      <div style={{ display: 'grid', gap: '1rem' }}>
-        {filtered.map((c, idx) => (
-          <div
-            key={c.userId}
-            style={{
-              padding: '1rem 1.25rem',
-              background: '#1e1e1e',
-              border: '1px solid #333',
-              borderRadius: '6px',
-            }}
-          >
-            {/* ── top row: rank + name + score bar ── */}
-            {/* Line 118 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
-              <div>
-                <span style={{ color: '#555', fontSize: '0.85rem', marginRight: '0.5rem' }}>
-                  #{idx + 1}
-                </span>
-                <Link
-                    to={`/profile/${c.userId}`}
-                    style={{ color: 'white', textDecoration: 'none', fontSize: '1.05rem', fontWeight: 'bold'  }}
-                    onMouseEnter={e => e.target.style.color = '#7ac'}
-                    onMouseLeave={e => e.target.style.color = 'white'}
-                  >
-                    {c.name}
-                  </Link>
-                {c.headline && (
-                  <p style={{ color: '#aaa', fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
-                    {c.headline}
-                  </p>
-                )}
-                <p style={{ color: '#666', fontSize: '0.8rem', margin: '0.1rem 0 0' }}>
-                  {c.email}
-                </p>
-              </div>
-
-              {/* ── score badge ── */}
-              <div style={{ textAlign: 'center' }}>
-                <div style={{
-                  fontSize: '1.5rem',
-                  fontWeight: 'bold',
-                  color: scoreColor(c.score),
-                  lineHeight: 1,
-                }}>
-                  {c.score}%
-                </div>
-                <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.2rem' }}>
-                  match
-                </div>
-              </div>
-            </div>
-
-            {/* ── score progress bar ── */}
-            <div style={{ height: '4px', background: '#333', borderRadius: '2px', marginBottom: '0.75rem' }}>
-              <div style={{
-                height: '100%',
-                width: `${c.score}%`,
-                background: scoreColor(c.score),
-                borderRadius: '2px',
-                transition: 'width 0.3s',
-              }} />
-            </div>
-
-            {/* ── matched skills (green) + missing skills (red) ── */}
-            {/* Line 150 */}
-            {c.matchedSkills?.length > 0 && (
-              <div style={{ marginBottom: '0.4rem' }}>
-                <span style={{ fontSize: '0.75rem', color: '#aaa' }}>Matched: </span>
-                {c.matchedSkills.map((s, i) => (
-                  <span key={i} style={tagStyle(true)}>{s}</span>
-                ))}
-              </div>
-            )}
-            {c.missingSkills?.length > 0 && (
-              <div>
-                <span style={{ fontSize: '0.75rem', color: '#aaa' }}>Missing: </span>
-                {c.missingSkills.map((s, i) => (
-                  <span key={i} style={tagStyle(false)}>{s}</span>
-                ))}
-              </div>
-            )}
-          </div>
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: '1px solid #1f2937', marginBottom: '1.25rem' }}>
+        {[['applications', `📥 Applications (${applications.length})`], ['matched', `🤝 All Matched (${matched?.candidates?.length || 0})`]].map(([id, label]) => (
+          <button key={id} onClick={() => setTab(id)} style={{ padding: '0.5rem 1.1rem', background: 'none', border: 'none', borderBottom: tab === id ? '2px solid #6366f1' : '2px solid transparent', color: tab === id ? '#818cf8' : '#4b5563', cursor: 'pointer', fontSize: '0.85rem', fontWeight: tab === id ? 600 : 400 }}>{label}</button>
         ))}
       </div>
+
+      {/* ── Applications Tab ── */}
+      {tab === 'applications' && (
+        applications.length === 0
+          ? <p style={{ color: '#4b5563' }}>No applications yet.</p>
+          : applications.map(app => (
+            <div key={app._id} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <div style={{ fontWeight: 600, color: '#e5e7eb' }}>{app.seeker.name}</div>
+                  <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>{app.seeker.email}</div>
+                  {app.profile?.headline && <div style={{ fontSize: '0.82rem', color: '#9ca3af', marginTop: '0.15rem' }}>{app.profile.headline}</div>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <span style={{ fontSize: '0.82rem', color: '#6366f1', fontWeight: 700 }}>{app.matchScore}% match</span>
+                  <span style={statusStyle(app.status)}>{app.status}</span>
+                </div>
+              </div>
+
+              {app.profile?.skills?.length > 0 && (
+                <div style={{ marginTop: '0.6rem' }}>
+                  {app.profile.skills.slice(0, 8).map((s, i) => <span key={i} style={tagStyle}>{s}</span>)}
+                </div>
+              )}
+
+              {app.coverNote && (
+                <div style={{ marginTop: '0.65rem', padding: '0.6rem 0.85rem', background: '#0f172a', borderRadius: '6px', fontSize: '0.83rem', color: '#9ca3af', borderLeft: '3px solid #374151' }}>
+                  <em>"{app.coverNote}"</em>
+                </div>
+              )}
+
+              {/* Status controls */}
+              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.85rem', flexWrap: 'wrap' }}>
+                {STATUS_OPTS.map(s => (
+                  <button key={s} disabled={app.status === s || updating === app._id}
+                    onClick={() => updateStatus(app._id, s, app.recruiterNote)}
+                    style={{ padding: '0.25rem 0.8rem', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer', border: '1px solid', fontWeight: app.status === s ? 700 : 400, ...statusStyle(s), opacity: app.status === s ? 1 : 0.55, transition: 'opacity 0.15s' }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                    onMouseLeave={e => e.currentTarget.style.opacity = app.status === s ? '1' : '0.55'}
+                  >
+                    {s === app.status ? '✓ ' : ''}{s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))
+      )}
+
+      {/* ── All Matched Tab ── */}
+      {tab === 'matched' && (
+        !matched?.candidates?.length
+          ? <p style={{ color: '#4b5563' }}>No candidates found.</p>
+          : matched.candidates.map((c, idx) => (
+            <div key={c.userId} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <span style={{ color: '#4b5563', fontSize: '0.8rem', minWidth: 22 }}>#{idx + 1}</span>
+                  <span style={{ fontWeight: 600, color: '#e5e7eb' }}>{c.name}</span>
+                </div>
+                <div style={{ fontSize: '0.82rem', color: '#6b7280', marginLeft: 30 }}>{c.headline}</div>
+                <div style={{ marginTop: '0.45rem', marginLeft: 30 }}>
+                  {c.matchedSkills.map((s, i) => <span key={i} style={{ ...tagStyle, color: '#34d399', borderColor: 'rgba(16,185,129,0.25)', background: 'rgba(16,185,129,0.08)' }}>{s}</span>)}
+                  {c.missingSkills.map((s, i) => <span key={i} style={{ ...tagStyle, color: '#f87171', borderColor: 'rgba(248,113,113,0.2)', background: 'rgba(248,113,113,0.06)' }}>{s}</span>)}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: c.score >= 70 ? '#34d399' : c.score >= 40 ? '#fbbf24' : '#f87171' }}>{c.score}%</div>
+                <div style={{ fontSize: '0.72rem', color: '#4b5563' }}>match score</div>
+              </div>
+            </div>
+          ))
+      )}
     </div>
   );
 }
-
-export default CandidatesPage;
