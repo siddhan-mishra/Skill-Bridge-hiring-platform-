@@ -5,7 +5,7 @@ const User        = require('../models/User');
 const { computeMatch } = require('../utils/matchUtils');
 const { notifyRecruiterNewApplication, notifySeekerStatusChange } = require('../services/emailService');
 
-// ── POST /api/applications/:jobId  — seeker applies ───────────────────────
+// ── POST /api/applications/:jobId  — seeker applies ──────────────────────
 exports.applyToJob = async (req, res) => {
   try {
     if (req.user.role !== 'seeker') {
@@ -15,11 +15,9 @@ exports.applyToJob = async (req, res) => {
     const job = await Job.findById(req.params.jobId).populate('recruiter', 'name email');
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
-    // Check duplicate
     const existing = await Application.findOne({ job: req.params.jobId, seeker: req.user._id });
     if (existing) return res.status(409).json({ message: 'You have already applied to this job', status: existing.status });
 
-    // Compute match score snapshot
     const profile = await Profile.findOne({ user: req.user._id });
     const { score } = computeMatch(profile?.skills || [], job.requiredSkills || []);
 
@@ -30,7 +28,6 @@ exports.applyToJob = async (req, res) => {
       matchScore: score,
     });
 
-    // Email recruiter — fire and forget, never block response
     const seekerUser = await User.findById(req.user._id).select('name email');
     notifyRecruiterNewApplication({
       recruiterEmail: job.recruiter.email,
@@ -49,13 +46,17 @@ exports.applyToJob = async (req, res) => {
   }
 };
 
-// ── GET /api/applications/my  — seeker sees all their applications ─────────
+// ── GET /api/applications/my  — seeker sees all their applications ────────
 exports.getMyApplications = async (req, res) => {
   try {
     if (req.user.role !== 'seeker') return res.status(403).json({ message: 'Seekers only' });
 
     const apps = await Application.find({ seeker: req.user._id })
-      .populate('job', 'title company location jobType salaryRange requiredSkills recruiter')
+      .populate({
+        path: 'job',
+        select: 'title company location jobType salaryRange requiredSkills recruiter',
+        populate: { path: 'recruiter', select: 'name email' },
+      })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -66,7 +67,7 @@ exports.getMyApplications = async (req, res) => {
   }
 };
 
-// ── GET /api/applications/job/:jobId  — recruiter sees applications for their job ──
+// ── GET /api/applications/job/:jobId  — recruiter sees applicants ─────────
 exports.getApplicationsForJob = async (req, res) => {
   try {
     if (req.user.role !== 'recruiter') return res.status(403).json({ message: 'Recruiters only' });
@@ -78,14 +79,13 @@ exports.getApplicationsForJob = async (req, res) => {
     }
 
     const apps = await Application.find({ job: req.params.jobId })
-      .populate('seeker', 'name email')
+      .populate('seeker', 'name email _id')
       .sort({ matchScore: -1, createdAt: 1 })
       .lean();
 
-    // Attach profile snapshot for each applicant
     const enriched = await Promise.all(apps.map(async (app) => {
       const profile = await Profile.findOne({ user: app.seeker._id })
-        .select('headline skills avatarUrl')
+        .select('headline skills avatarUrl location')
         .lean();
       return { ...app, profile: profile || {} };
     }));
@@ -119,14 +119,19 @@ exports.updateApplicationStatus = async (req, res) => {
     if (recruiterNote !== undefined) app.recruiterNote = recruiterNote;
     await app.save();
 
-    // Email seeker about status change
+    // Get recruiter details to share email with seeker when shortlisted
+    const recruiterUser = await User.findById(req.user._id).select('name email');
+
     notifySeekerStatusChange({
-      seekerEmail:  app.seeker.email,
-      seekerName:   app.seeker.name,
-      jobTitle:     app.job.title,
-      company:      app.job.company,
+      seekerEmail:    app.seeker.email,
+      seekerName:     app.seeker.name,
+      jobTitle:       app.job.title,
+      company:        app.job.company,
       status,
-      recruiterNote: app.recruiterNote,
+      recruiterNote:  app.recruiterNote,
+      // Only passed when shortlisted — email template conditionally shows this block
+      recruiterEmail: status === 'shortlisted' ? recruiterUser.email : null,
+      recruiterName:  status === 'shortlisted' ? recruiterUser.name  : null,
     }).catch(err => console.error('[email] seeker notify failed:', err.message));
 
     res.json({ message: 'Status updated', application: app });
@@ -136,7 +141,7 @@ exports.updateApplicationStatus = async (req, res) => {
   }
 };
 
-// ── GET /api/applications/check/:jobId  — seeker checks if applied ─────────
+// ── GET /api/applications/check/:jobId  — seeker checks if applied ────────
 exports.checkApplication = async (req, res) => {
   try {
     const app = await Application.findOne({ job: req.params.jobId, seeker: req.user._id });
