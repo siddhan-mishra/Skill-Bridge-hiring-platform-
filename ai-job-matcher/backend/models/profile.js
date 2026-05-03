@@ -3,15 +3,16 @@ const mongoose = require('mongoose');
 const workHistorySchema = new mongoose.Schema({
   company:      { type: String },
   role:         { type: String },
-  startDate:    { type: String },   // e.g. "Jan 2022"
-  endDate:      { type: String },   // "Present" or date
-  achievements: [{ type: String }], // bullet points
+  startDate:    { type: String },
+  endDate:      { type: String },
+  achievements: [{ type: String }],
 }, { _id: false });
 
 const certificationSchema = new mongoose.Schema({
   name:   { type: String },
   issuer: { type: String },
   year:   { type: String },
+  link:   { type: String },   // ← added: certificate URL
 }, { _id: false });
 
 const profileSchema = new mongoose.Schema({
@@ -22,28 +23,28 @@ const profileSchema = new mongoose.Schema({
     unique: true,
   },
 
-  // ── Identity ─────────────────────────────────────────────────
+  // ── Identity
   fullName:       { type: String },
   headline:       { type: String },
-  avatarUrl:      { type: String },   // Cloudinary URL
+  avatarUrl:      { type: String },
   phone:          { type: String },
-  location:       { type: String },   // "Bhubaneswar, India"
+  location:       { type: String },
   citizenship:    { type: String },
 
-  // ── Links ─────────────────────────────────────────────────────
+  // ── Links
   linkedinUrl:    { type: String },
   portfolioUrl:   { type: String },
   githubUrl:      { type: String },
 
-  // ── Professional ──────────────────────────────────────────────
+  // ── Professional
   summary:        { type: String },
   skills:         [{ type: String }],
-  tools:          [{ type: String }], // Tools & Technologies (separate from core skills)
+  tools:          [{ type: String }],
   yearsOfExp:     { type: Number },
   currentTitle:   { type: String },
   currentCompany: { type: String },
 
-  // ── History ───────────────────────────────────────────────────
+  // ── History
   workHistory: [workHistorySchema],
   education: [{
     degree:    String,
@@ -52,7 +53,7 @@ const profileSchema = new mongoose.Schema({
     gpa:       String,
   }],
   certifications: [certificationSchema],
-  languages:      [{ type: String }], // e.g. ["English", "Hindi"]
+  languages:      [{ type: String }],
   projects: [{
     title:        String,
     description:  String,
@@ -60,16 +61,16 @@ const profileSchema = new mongoose.Schema({
     link:         String,
   }],
 
-  // ── Preferences ───────────────────────────────────────────────
-  preferredTitles:  [{ type: String }],
-  desiredSalary:    { type: String },   // e.g. "8-12 LPA"
-  employmentType:   { type: String },   // Full-time / Contract / Freelance
-  workMode:         { type: String },   // Remote / Hybrid / On-site
-  noticePeriod:     { type: String },   // e.g. "30 days"
-  willingToRelocate:{ type: Boolean, default: false },
+  // ── Preferences
+  preferredTitles:   [{ type: String }],
+  desiredSalary:     { type: String },
+  employmentType:    { type: String },
+  workMode:          { type: String },
+  noticePeriod:      { type: String },
+  willingToRelocate: { type: Boolean, default: false },
 
-  // ── Files ─────────────────────────────────────────────────────
-  resumeUrl:        { type: String },   // Cloudinary raw PDF URL
+  // ── Files
+  resumeUrl: { type: String },
 
 }, { timestamps: true });
 
