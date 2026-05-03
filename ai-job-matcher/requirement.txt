@@ -5,3 +5,6 @@ skillNer
 IPython
 pdfplumber
 pdfplumber python-multipart
+google-generativeai pdfplumber
+google-genai
+python-dotenv

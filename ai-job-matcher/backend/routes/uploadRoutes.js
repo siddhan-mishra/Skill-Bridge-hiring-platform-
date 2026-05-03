@@ -2,7 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const multer  = require('multer');
 const { protect } = require('../middleware/authMiddleware');
-const cloudinary  = require('../config/cloudinary');
+const { cloudinary } = require('../config/cloudinary');
 const Profile     = require('../models/profile');
 const axios       = require('axios');
 
@@ -57,8 +57,6 @@ router.post('/avatar', protect, upload.single('avatar'), async (req, res) => {
 });
 
 // ── POST /api/upload/resume ───────────────────────────────────────────────
-// Accepts: application/pdf
-// Returns: { resumeUrl, parsed } — parsed is the full extracted profile JSON
 router.post('/resume', protect, upload.single('resume'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
@@ -66,7 +64,7 @@ router.post('/resume', protect, upload.single('resume'), async (req, res) => {
       return res.status(400).json({ message: 'Only PDF files are accepted' });
     }
 
-    // 1. Upload raw PDF to Cloudinary
+    // 1. Upload to Cloudinary first — fast, ~2-3s
     const result = await uploadToCloudinary(req.file.buffer, {
       folder:        'skillbridge/resumes',
       public_id:     `resume_${req.user._id}`,
@@ -74,7 +72,15 @@ router.post('/resume', protect, upload.single('resume'), async (req, res) => {
       overwrite:     true,
     });
 
-    // 2. Send buffer to Python NLP service for full parsing
+    // 2. Save resumeUrl immediately — don't wait for parsing
+    await Profile.findOneAndUpdate(
+      { user: req.user._id },
+      { resumeUrl: result.secure_url, user: req.user._id },
+      { upsert: true, new: true }
+    );
+
+    // 3. Call Python parser — with generous timeout
+    //    If it fails, we still return resumeUrl so the file is saved
     const NLP_BASE = process.env.NLP_SERVICE_URL || 'http://localhost:8000';
     const FormData = require('form-data');
     const form = new FormData();
@@ -83,24 +89,23 @@ router.post('/resume', protect, upload.single('resume'), async (req, res) => {
       contentType: 'application/pdf',
     });
 
-    const nlpRes = await axios.post(`${NLP_BASE}/parse-resume`, form, {
-      headers: form.getHeaders(),
-      timeout: 30000,
-    });
-
-    const parsed = nlpRes.data; // { fullName, headline, skills, tools, ... }
-
-    // 3. Save resumeUrl to profile (don't auto-save parsed fields — let user confirm)
-    await Profile.findOneAndUpdate(
-      { user: req.user._id },
-      { resumeUrl: result.secure_url, user: req.user._id },
-      { upsert: true, new: true }
-    );
+    let parsed = {};
+    try {
+      const nlpRes = await axios.post(`${NLP_BASE}/parse-resume`, form, {
+        headers: form.getHeaders(),
+        timeout: 120000,   // 2 minutes — Gemini is fast but give it room
+      });
+      parsed = nlpRes.data;
+    } catch (nlpErr) {
+      // Parsing failed but file is already saved — don't block the user
+      console.error('NLP parse failed (file still saved):', nlpErr.message);
+    }
 
     res.json({ resumeUrl: result.secure_url, parsed });
+
   } catch (err) {
     console.error('Resume upload error:', err);
-    res.status(500).json({ message: err.message || 'Resume parse failed' });
+    res.status(500).json({ message: err.message || 'Resume upload failed' });
   }
 });
 

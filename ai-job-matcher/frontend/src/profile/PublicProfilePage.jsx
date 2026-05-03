@@ -64,13 +64,21 @@ function PublicProfilePage() {
           <div>
             {/* avatar circle with initials */}
             <div style={{
-              width: 64, height: 64, borderRadius: '50%',
+              width: 72, height: 72, borderRadius: '50%',
               background: 'linear-gradient(135deg, #2a6496, #1a3a5a)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '1.5rem', fontWeight: 'bold', color: 'white',
-              marginBottom: '0.75rem',
+              marginBottom: '0.75rem', overflow: 'hidden', flexShrink: 0,
+              border: '2px solid #2a4a6a',
             }}>
-              {profile.user?.name?.charAt(0)?.toUpperCase() || '?'}
+              {profile.avatarUrl
+                ? <img
+                    src={profile.avatarUrl}
+                    alt="avatar"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                : profile.user?.name?.charAt(0)?.toUpperCase() || '?'
+              }
             </div>
             <h2 style={{ margin: 0 }}>{profile.user?.name}</h2>
             {profile.headline && (
@@ -213,8 +221,32 @@ function PublicProfilePage() {
           </div>
         </div>
       )}
-
-      {/* ── empty state ── */}
+      {/* ── resume ── */}
+      {profile.resumeUrl && (
+        <div style={sectionCard}>
+          <h3 style={sectionTitle}>📄 Resume</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <a
+              href={profile.resumeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                padding: '0.45rem 1.1rem',
+                background: '#0e2233', color: '#5ab0e0',
+                border: '1px solid #1a4a6a', borderRadius: '7px',
+                textDecoration: 'none', fontSize: '0.88rem', fontWeight: 600,
+              }}
+            >
+              📥 View / Download Resume (PDF)
+            </a>
+            <span style={{ color: '#555', fontSize: '0.78rem' }}>
+              Opens in new tab
+            </span>
+          </div>
+        </div>
+      )}
+            {/* ── empty state ── */}
       {!profile.skills?.length && !profile.education?.length && !profile.projects?.length && (
         <div style={{ ...sectionCard, textAlign: 'center', color: '#666', padding: '3rem' }}>
           <p style={{ fontSize: '1.1rem' }}>This profile is empty.</p>
