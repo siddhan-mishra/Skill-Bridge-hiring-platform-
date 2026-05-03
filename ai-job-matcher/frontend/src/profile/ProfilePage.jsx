@@ -479,6 +479,7 @@ export default function ProfilePage() {
 
             <div style={S.grid2}>
               <F label="Full Name"><input style={S.inp} value={form.fullName} onChange={e => set('fullName', e.target.value)} placeholder="Siddhan Mishra" /></F>
+              <F label="Email (account)"><input style={{ ...S.inp, color: '#555', cursor: 'not-allowed' }} value={user?.email || ''}     readOnly disabled   /> </F>           
               <F label="Professional Headline"><input style={S.inp} value={form.headline} onChange={e => set('headline', e.target.value)} placeholder="MERN + AI Developer · Open to work" /></F>
               <F label="Phone"><input style={S.inp} value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+91 98765 43210" /></F>
               <F label="Location (City, Country)"><input style={S.inp} value={form.location} onChange={e => set('location', e.target.value)} placeholder="Bhubaneswar, India" /></F>
