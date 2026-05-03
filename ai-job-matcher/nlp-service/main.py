@@ -1,12 +1,17 @@
 import re
+import os
 import io
 import spacy
+import json
 from spacy.matcher import PhraseMatcher
 from fastapi import FastAPI, UploadFile, File   # ← added UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from skillNer.skill_extractor_class import SkillExtractor
 import pdfplumber                               # ← new library
+from google import genai as genai_new
+from dotenv import load_dotenv
+load_dotenv()  # ← must be called BEFORE os.environ.get()
 
 try:
     from skillNer.general_params import SKILL_DB
@@ -28,6 +33,8 @@ app.add_middleware(
 
 nlp = spacy.load("en_core_web_sm")
 skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
+
+gemini = genai_new.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 class TextIn(BaseModel):
     text: str
@@ -150,122 +157,85 @@ def run_skillner(text):
 # ── THE NEW ENDPOINT ─────────────────────────────────────────────
 @app.post("/parse-resume")
 async def parse_resume(file: UploadFile = File(...)):
-    """
-    POST a PDF resume as multipart/form-data.
-    Returns structured JSON with all extracted profile fields.
-    """
-    # 1. Read file bytes from the uploaded file
     content = await file.read()
-
-    # 2. Convert PDF to plain text
     text = pdf_to_text(content)
 
     if not text.strip():
         return {"error": "Could not read text from this PDF. Make sure it is not a scanned image."}
 
-    # 3. Split into lines for heuristic parsing
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
-
-    # 4. Full name heuristic: first non-empty line is usually the name
-    full_name = lines[0] if lines else None
-
-    # 5. Run SkillNer on full text
-    skills = run_skillner(text)
-
-    # 6. Extract contact info
+    # Fast regex for contact fields
     email     = get_email(text)
     phone     = get_phone(text)
     linkedin  = get_linkedin(text)
     github    = get_github(text)
     portfolio = get_portfolio(text)
 
-    # 7. Extract the summary/bio section
-    summary = get_section(
-        text,
-        section_names=["Summary", "Professional Summary", "Objective", "About Me", "Profile", "About"],
-        stop_names=["Experience", "Work History", "Education", "Skills", "Projects", "Certifications", "Languages"]
-    )
+    # SkillNer for skills (keeping your existing NLP work)
+    skills = run_skillner(text)
 
-    # 8. Extract and parse education section
-    education_text = get_section(
-        text,
-        section_names=["Education", "Academic Background", "Qualifications"],
-        stop_names=["Experience", "Work History", "Skills", "Projects", "Certifications", "Languages", "References"]
-    )
-    education = []
-    for line in education_text.split('\n'):
-        line = line.strip()
-        if line:
-            education.append({
-                "degree": line,
-                "institute": "",
-                "year": "",
-                "gpa": ""
-            })
+    # Gemini for everything structural
+    prompt = f"""
+You are a resume parser. Extract structured information from the resume text below.
+Return ONLY valid JSON with these exact keys (use null if not found):
+{{
+  "fullName": "string",
+  "headline": "string",
+  "summary": "string",
+  "currentTitle": "string",
+  "currentCompany": "string",
+  "yearsOfExp": null,
+  "workHistory": [
+    {{"role": "string", "company": "string", "startDate": "string", "endDate": "string", "achievements": ["string"]}}
+  ],
+  "education": [
+    {{"degree": "string", "institute": "string", "year": "string", "gpa": "string"}}
+  ],
+  "certifications": [
+    {{"name": "string", "issuer": "string", "year": "string"}}
+  ],
+  "languages": ["string"],
+  "tools": ["string"]
+}}
 
-    # 9. Extract and parse work history section
-    work_text = get_section(
-        text,
-        section_names=["Experience", "Work Experience", "Work History", "Employment History"],
-        stop_names=["Education", "Skills", "Projects", "Certifications", "Languages", "References"]
-    )
-    work_history = []
-    work_lines = [l.strip() for l in work_text.split('\n') if l.strip()]
-    i = 0
-    while i < len(work_lines):
-        entry = {
-            "company": "",
-            "role": work_lines[i],
-            "startDate": "",
-            "endDate": "",
-            "achievements": []
-        }
-        if i + 1 < len(work_lines):
-            entry["company"] = work_lines[i + 1]
-            i += 2
-        else:
-            i += 1
-        # Collect bullet achievements (lines starting with •, -, *, ◦)
-        while i < len(work_lines) and work_lines[i].startswith(('•', '-', '*', '◦')):
-            entry["achievements"].append(work_lines[i].lstrip('•-*◦ '))
-            i += 1
-        work_history.append(entry)
+Resume text:
+\"\"\"
+{text[:6000]}
+\"\"\"
 
-    # 10. Extract certifications
-    cert_text = get_section(
-        text,
-        section_names=["Certifications", "Licenses", "Certificates", "Achievements"],
-        stop_names=["Projects", "Languages", "References", "Skills"]
-    )
-    certifications = []
-    for line in cert_text.split('\n'):
-        line = line.strip().lstrip('•-*◦ ')
-        if line:
-            certifications.append({"name": line, "issuer": "", "year": ""})
+Return ONLY the JSON object. No explanation. No markdown fences.
+"""
+    try:
+        response = gemini.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        raw = response.text.strip()
+        # Strip markdown fences if Gemini adds them anyway
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        parsed = json.loads(raw)
+    except Exception as ex:
+        print(f"Gemini parse error: {ex}")
+        parsed = {}
 
-    # 11. Extract languages
-    lang_text = get_section(
-        text,
-        section_names=["Languages", "Language Skills", "Languages Known"],
-        stop_names=["References", "Projects", "Certifications", "Experience"]
-    )
-    languages = [
-        l.strip().lstrip('•-*◦ ')
-        for l in lang_text.split('\n') if l.strip()
-    ]
-
-    # 12. Return everything
     return {
-        "fullName":       full_name,
+        "fullName":       parsed.get("fullName"),
         "email":          email,
         "phone":          phone,
         "linkedinUrl":    linkedin,
         "githubUrl":      github,
         "portfolioUrl":   portfolio,
-        "summary":        summary,
+        "headline":       parsed.get("headline"),
+        "summary":        parsed.get("summary"),
+        "currentTitle":   parsed.get("currentTitle"),
+        "currentCompany": parsed.get("currentCompany"),
+        "yearsOfExp":     parsed.get("yearsOfExp"),
         "skills":         skills,
-        "education":      education,
-        "workHistory":    work_history,
-        "certifications": certifications,
-        "languages":      languages,
+        "tools":          parsed.get("tools", []),
+        "workHistory":    parsed.get("workHistory", []),
+        "education":      parsed.get("education", []),
+        "certifications": parsed.get("certifications", []),
+        "languages":      parsed.get("languages", []),
     }

@@ -76,6 +76,7 @@ export default function ProfilePage() {
   const [uploading,    setUploading]    = useState(false);
   const [parsing,      setParsing]      = useState(false);
   const [parsePreview, setParsePreview] = useState(null);
+  const [originalForm, setOriginalForm] = useState(null);
 
   const [form, setForm] = useState({
     // Identity
@@ -95,6 +96,7 @@ export default function ProfilePage() {
     preferredTitles: '', desiredSalary: '',
     employmentType: 'Full-time', workMode: 'On-site',
     noticePeriod: '', willingToRelocate: false,
+    resumeUrl: '',
   });
 
   // ── Shape raw DB profile into form state ─────────────────────
@@ -129,6 +131,7 @@ export default function ProfilePage() {
     workMode:        p.workMode        || 'On-site',
     noticePeriod:    p.noticePeriod    || '',
     willingToRelocate: p.willingToRelocate || false,
+    resumeUrl: p.resumeUrl || '',
   }), []);
 
   // ── Fetch profile on mount ────────────────────────────────────
@@ -140,6 +143,7 @@ export default function ProfilePage() {
         });
         if (res.data) {
           setForm(shapeForm(res.data));
+          setOriginalForm(shapeForm(res.data));
           if (res.data.avatarUrl) setAvatarB64(res.data.avatarUrl);
         }
       } catch (e) { console.error(e); }
@@ -189,65 +193,34 @@ export default function ProfilePage() {
     reader.readAsDataURL(file);
   };
 
-  // ── Resume: upload PDF → NLP → preview parsed data ───────────
+  // ── Resume: upload PDF →  node backend saves to cloud then NLP → preview parsed data ───────────
   const handleResumeUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setParsing(true); setParsePreview(null);
     try {
       const fd = new FormData();
-      fd.append('file', file);  // key must match FastAPI param name "file"
+      fd.append('resume', file);   // key is 'resume' to match uploadRoutes.js
+      // Goes through Node backend — saves resumeUrl to DB AND parses
       const res = await axios.post(
-        // Direct call to Python NLP service
-        `http://localhost:8000/parse-resume`,
+        `${API_BASE}/api/upload/resume`,
         fd,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            Authorization: `Bearer ${token}`,
+          },
+        }
       );
-      setParsePreview(res.data);
-      setMsg('✅ Resume parsed! Review below and click "Apply to Profile".');
+      // Backend returns { resumeUrl, parsed }
+      setParsePreview(res.data.parsed);
+      setForm(f => ({ ...f, resumeUrl: res.data.resumeUrl })); // keep it in form state
+      setMsg('✅ Resume uploaded & parsed! Review below and click "Apply to Profile".');
     } catch (e) {
-      setErr('Resume parse failed: ' + (e.response?.data?.detail || e.message));
-    } finally { setParsing(false); }
-  };
-
-  // ── Apply parsed resume data to form ─────────────────────────
-  const applyParsed = () => {
-    if (!parsePreview) return;
-    const p = parsePreview;
-    setForm(f => ({
-      ...f,
-      fullName:    p.fullName    || f.fullName,
-      phone:       p.phone       || f.phone,
-      linkedinUrl: p.linkedinUrl || f.linkedinUrl,
-      githubUrl:   p.githubUrl   || f.githubUrl,
-      portfolioUrl:p.portfolioUrl|| f.portfolioUrl,
-      summary:     p.summary     || f.summary,
-      // Merge skills (don't overwrite, add new ones)
-      skills: p.skills?.length
-        ? Array.from(new Set([
-            ...f.skills.split(',').map(s => s.trim()).filter(Boolean),
-            ...p.skills
-          ])).join(', ')
-        : f.skills,
-      // Replace arrays only if parsed has data
-      education: p.education?.length
-        ? p.education.map(e => ({ degree: e.degree || '', institute: e.institute || '', year: e.year || '', gpa: e.gpa || '' }))
-        : f.education,
-      workHistory: p.workHistory?.length
-        ? p.workHistory.map(w => ({ ...w, achievements: (w.achievements || []).join('\n') }))
-        : f.workHistory,
-      certifications: p.certifications?.length
-        ? p.certifications
-        : f.certifications,
-      languages: p.languages?.length
-        ? Array.from(new Set([
-            ...f.languages.split(',').map(s => s.trim()).filter(Boolean),
-            ...p.languages
-          ])).join(', ')
-        : f.languages,
-    }));
-    setParsePreview(null);
-    setMsg('✅ Applied! Review all tabs, then click Save.');
+      setErr('Resume upload failed: ' + (e.response?.data?.message || e.message));
+    } finally {
+      setParsing(false);
+    }
   };
 
   // ── NLP extract skills from summary ──────────────────────────
@@ -265,6 +238,85 @@ export default function ProfilePage() {
       set('skills', Array.from(new Set([...existing, ...extracted])).join(', '));
       setMsg(`✅ ${extracted.length} skills extracted.`);
     } catch { setErr('Skill extraction failed.'); }
+  };
+  // ── Apply parsed resume data to form ─────────────────────────
+  const applyParsed = () => {
+    if (!parsePreview) return;
+    const p = parsePreview;
+
+    setForm(f => ({
+      ...f,
+      fullName:       p.fullName       || f.fullName,
+      phone:          p.phone          || f.phone,
+      headline:       p.headline       || f.headline,
+      summary:        p.summary        || f.summary,
+      linkedinUrl:    p.linkedinUrl    || f.linkedinUrl,
+      githubUrl:      p.githubUrl      || f.githubUrl,
+      portfolioUrl:   p.portfolioUrl   || f.portfolioUrl,
+      currentTitle:   p.currentTitle   || f.currentTitle,
+      currentCompany: p.currentCompany || f.currentCompany,
+      yearsOfExp:     p.yearsOfExp     || f.yearsOfExp,
+      // Merge skills safely
+      skills: p.skills?.length
+        ? Array.from(new Set([
+            ...f.skills.split(',').map(s => s.trim()).filter(Boolean),
+            ...p.skills,
+          ])).join(', ')
+        : f.skills,
+      // Merge tools safely
+      tools: p.tools?.length
+        ? Array.from(new Set([
+            ...f.tools.split(',').map(s => s.trim()).filter(Boolean),
+            ...p.tools,
+          ])).join(', ')
+        : f.tools,
+      // Replace arrays only if parsed actually has data
+      education: p.education?.length
+        ? p.education.map(e => ({
+            degree:    e.degree    || '',
+            institute: e.institute || '',
+            year:      e.year      || '',
+            gpa:       e.gpa       || '',
+          }))
+        : f.education,
+      workHistory: p.workHistory?.length
+        ? p.workHistory.map(w => ({
+            company:      w.company   || '',
+            role:         w.role      || '',
+            startDate:    w.startDate || '',
+            endDate:      w.endDate   || '',
+            achievements: Array.isArray(w.achievements)
+              ? w.achievements.join('\n')
+              : (w.achievements || ''),
+          }))
+        : f.workHistory,
+      certifications: p.certifications?.length
+        ? p.certifications.map(c => ({
+            name:   c.name   || '',
+            issuer: c.issuer || '',
+            year:   c.year   || '',
+            link:   c.link   || '',
+          }))
+        : f.certifications,
+      languages: p.languages?.length
+        ? Array.from(new Set([
+            ...f.languages.split(',').map(s => s.trim()).filter(Boolean),
+            ...p.languages,
+          ])).join(', ')
+        : f.languages,
+    }));
+
+    setParsePreview(null);
+    setMsg('✅ Applied! Review all tabs, then click Save.');
+  };
+
+  const handleCancel = () => {
+    
+    if (!originalForm) return;
+    setForm(originalForm);
+    setAvatarB64(originalForm.avatarUrl || null);
+    setParsePreview(null);
+    setMsg('Changes discarded.');
   };
 
   // ── Save profile ──────────────────────────────────────────────
@@ -294,6 +346,7 @@ export default function ProfilePage() {
       desiredSalary: form.desiredSalary,
       employmentType: form.employmentType, workMode: form.workMode,
       noticePeriod: form.noticePeriod, willingToRelocate: form.willingToRelocate,
+      resumeUrl: form.resumeUrl || undefined,
     };
     try {
       await axios.put(`${API_BASE}/api/profile/me`, payload, {
@@ -320,13 +373,22 @@ export default function ProfilePage() {
     <div className="card" style={{ maxWidth: 780, margin: '0 auto' }}>
 
       {/* Header */}
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <h2 style={{ margin: 0 }}>Edit Profile</h2>
-        <button
-          onClick={handleSubmit} disabled={saving}
-          style={{ padding: '0.45rem 1.4rem', background: saving ? '#222' : '#0e3a5a', color: saving ? '#555' : '#5ab0e0', border: '1px solid #1a5a7a', borderRadius: '7px', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: '0.88rem' }}
-        >{saving ? 'Saving…' : '💾 Save All'}</button>
+        <div style={{ display: 'flex', gap: '0.6rem' }}>
+          <button
+            type="button"
+            onClick={handleCancel}
+            style={{ padding: '0.45rem 1.1rem', background: 'none', color: '#888', border: '1px solid #333', borderRadius: '7px', cursor: 'pointer', fontSize: '0.88rem' }}
+          >✕ Cancel</button>
+          <button
+            onClick={handleSubmit} disabled={saving}
+            style={{ padding: '0.45rem 1.4rem', background: saving ? '#222' : '#0e3a5a', color: saving ? '#555' : '#5ab0e0', border: '1px solid #1a5a7a', borderRadius: '7px', cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: '0.88rem' }}
+          >{saving ? 'Saving…' : '💾 Save All'}</button>
+        </div>
       </div>
+      
 
       {/* Toast messages */}
       {err && <div style={{ padding: '0.6rem 1rem', background: '#1a0000', border: '1px solid #5a0000', borderRadius: '6px', color: '#ff7070', marginBottom: '0.75rem', fontSize: '0.85rem' }}>{err}</div>}
