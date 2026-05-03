@@ -304,6 +304,16 @@ export default function ProfilePage() {
             ...p.languages,
           ])).join(', ')
         : f.languages,
+      projects: p.projects?.length
+        ? p.projects.map(pr => ({
+            title:        pr.title        || '',
+            description:  pr.description  || '',
+            technologies: Array.isArray(pr.technologies)
+              ? pr.technologies.join(', ')
+              : (pr.technologies || ''),
+            link: pr.link || '',
+          }))
+        : f.projects,
     }));
 
     setParsePreview(null);

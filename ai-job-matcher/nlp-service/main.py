@@ -163,46 +163,47 @@ async def parse_resume(file: UploadFile = File(...)):
     if not text.strip():
         return {"error": "Could not read text from this PDF. Make sure it is not a scanned image."}
 
-    # Fast regex for contact fields
+    # Regex for contact fields — instant
     email     = get_email(text)
     phone     = get_phone(text)
     linkedin  = get_linkedin(text)
     github    = get_github(text)
     portfolio = get_portfolio(text)
 
-    # SkillNer for skills (keeping your existing NLP work)
-    skills = run_skillner(text)
-
-    # Gemini for everything structural
+    # Gemini handles EVERYTHING structural including skills
+    # SkillNer is NOT called here — too slow on full PDF text
     prompt = f"""
 You are a resume parser. Extract structured information from the resume text below.
-Return ONLY valid JSON with these exact keys (use null if not found):
+Return ONLY valid JSON. No explanation. No markdown fences. No extra text.
+
 {{
-  "fullName": "string",
-  "headline": "string",
-  "summary": "string",
-  "currentTitle": "string",
-  "currentCompany": "string",
-  "yearsOfExp": null,
+  "fullName": "string or null",
+  "headline": "string or null",
+  "summary": "string or null",
+  "currentTitle": "string or null",
+  "currentCompany": "string or null",
+  "yearsOfExp": 0,
+  "skills": ["skill1", "skill2"],
+  "tools": ["tool1", "tool2"],
   "workHistory": [
     {{"role": "string", "company": "string", "startDate": "string", "endDate": "string", "achievements": ["string"]}}
   ],
   "education": [
-    {{"degree": "string", "institute": "string", "year": "string", "gpa": "string"}}
+    {{"degree": "string", "institute": "string", "year": "string", "gpa": "string or null"}}
   ],
   "certifications": [
     {{"name": "string", "issuer": "string", "year": "string"}}
   ],
   "languages": ["string"],
-  "tools": ["string"]
+  "projects": [
+    {{"title": "string", "description": "string", "technologies": ["string"], "link": "string or null"}}
+  ]
 }}
 
 Resume text:
 \"\"\"
-{text[:6000]}
+{text[:8000]}
 \"\"\"
-
-Return ONLY the JSON object. No explanation. No markdown fences.
 """
     try:
         response = gemini.models.generate_content(
@@ -210,12 +211,13 @@ Return ONLY the JSON object. No explanation. No markdown fences.
             contents=prompt
         )
         raw = response.text.strip()
-        # Strip markdown fences if Gemini adds them anyway
+        # Strip markdown fences if Gemini adds them
         if raw.startswith("```"):
-            raw = raw.split("```")[1]
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
             if raw.startswith("json"):
                 raw = raw[4:]
-        parsed = json.loads(raw)
+        parsed = json.loads(raw.strip())
     except Exception as ex:
         print(f"Gemini parse error: {ex}")
         parsed = {}
@@ -232,10 +234,11 @@ Return ONLY the JSON object. No explanation. No markdown fences.
         "currentTitle":   parsed.get("currentTitle"),
         "currentCompany": parsed.get("currentCompany"),
         "yearsOfExp":     parsed.get("yearsOfExp"),
-        "skills":         skills,
+        "skills":         parsed.get("skills", []),
         "tools":          parsed.get("tools", []),
         "workHistory":    parsed.get("workHistory", []),
         "education":      parsed.get("education", []),
         "certifications": parsed.get("certifications", []),
         "languages":      parsed.get("languages", []),
+        "projects":       parsed.get("projects", []),
     }

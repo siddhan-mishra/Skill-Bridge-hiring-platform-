@@ -64,23 +64,33 @@ router.post('/resume', protect, upload.single('resume'), async (req, res) => {
       return res.status(400).json({ message: 'Only PDF files are accepted' });
     }
 
-    // 1. Upload to Cloudinary first — fast, ~2-3s
+    // 1. Upload PDF to Cloudinary with correct content type for browser preview
     const result = await uploadToCloudinary(req.file.buffer, {
       folder:        'skillbridge/resumes',
       public_id:     `resume_${req.user._id}`,
       resource_type: 'raw',
       overwrite:     true,
+      format:        'pdf',
+      // This makes browser open it instead of downloading
+      type:          'upload',
     });
 
-    // 2. Save resumeUrl immediately — don't wait for parsing
-    await Profile.findOneAndUpdate(
-      { user: req.user._id },
-      { resumeUrl: result.secure_url, user: req.user._id },
-      { upsert: true, new: true }
+    // Build a URL that forces inline viewing in browser
+    // Replace /raw/upload/ with /raw/upload/fl_attachment:false/
+    const rawUrl = result.secure_url;
+    const resumeUrl = rawUrl.replace(
+      '/raw/upload/',
+      '/raw/upload/fl_inline/'
     );
 
-    // 3. Call Python parser — with generous timeout
-    //    If it fails, we still return resumeUrl so the file is saved
+    // 2. Save resumeUrl immediately
+    await Profile.findOneAndUpdate(
+      { user: req.user._id },
+      { resumeUrl, user: req.user._id },
+      { returnDocument: 'after', upsert: true }
+    );
+
+    // 3. Call Python parser — now fast since SkillNer is removed
     const NLP_BASE = process.env.NLP_SERVICE_URL || 'http://localhost:8000';
     const FormData = require('form-data');
     const form = new FormData();
@@ -93,15 +103,14 @@ router.post('/resume', protect, upload.single('resume'), async (req, res) => {
     try {
       const nlpRes = await axios.post(`${NLP_BASE}/parse-resume`, form, {
         headers: form.getHeaders(),
-        timeout: 120000,   // 2 minutes — Gemini is fast but give it room
+        timeout: 30000,   // 30s is enough now — only Gemini, no SkillNer
       });
       parsed = nlpRes.data;
     } catch (nlpErr) {
-      // Parsing failed but file is already saved — don't block the user
       console.error('NLP parse failed (file still saved):', nlpErr.message);
     }
 
-    res.json({ resumeUrl: result.secure_url, parsed });
+    res.json({ resumeUrl, parsed });
 
   } catch (err) {
     console.error('Resume upload error:', err);
