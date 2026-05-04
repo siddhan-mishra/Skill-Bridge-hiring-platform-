@@ -5,8 +5,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../auth/AuthContext';
+import ResumeButton from './ResumeButton';
 
 const scoreColor = (s) => s >= 75 ? '#34d399' : s >= 50 ? '#fbbf24' : s >= 25 ? '#f97316' : '#f87171';
+
+<ResumeButton style={{ marginTop: '1rem' }} />
 
 const STATUS_STYLE = {
   pending:     { color: '#fbbf24', bg: 'rgba(245,158,11,0.1)'   },
