@@ -12,11 +12,10 @@ exports.getMyProfile = async (req, res) => {
 
 exports.upsertMyProfile = async (req, res) => {
   try {
-    const data = req.body;
     const profile = await Profile.findOneAndUpdate(
       { user: req.user._id },
-      { ...data, user: req.user._id },
-      { new: true, upsert: true }
+      { ...req.body, user: req.user._id },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
     res.json(profile);
   } catch (err) {
@@ -25,7 +24,7 @@ exports.upsertMyProfile = async (req, res) => {
   }
 };
 
-// Line added: GET /api/profile/:userId — public profile view (any logged-in user)
+// GET /api/profile/:userId — public profile view (any logged-in user)
 exports.getProfileByUserId = async (req, res) => {
   try {
     const profile = await Profile
@@ -37,7 +36,6 @@ exports.getProfileByUserId = async (req, res) => {
       return res.status(404).json({ message: 'Profile not found' });
     }
 
-    // never expose password — populate only returns name/email/role (safe)
     res.json(profile);
   } catch (err) {
     console.error('getProfileByUserId error:', err);

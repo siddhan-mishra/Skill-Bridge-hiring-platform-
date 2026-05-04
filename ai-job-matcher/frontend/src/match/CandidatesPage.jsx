@@ -1,25 +1,35 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import axios from 'axios';
-import { useAuth } from '../auth/AuthContext';
+import { getAppsForJob, getCandidates, updateAppStatus } from '../api/jobApi';
 
-const STATUS_OPTS = ['pending', 'reviewed', 'shortlisted', 'rejected'];
+// STATUS_OPTS now includes 'hired'
+const STATUS_OPTS = ['pending', 'reviewed', 'shortlisted', 'hired', 'rejected'];
 
 const statusStyle = (s) => {
   const map = {
     pending:     { bg: 'rgba(99,102,241,0.12)',  color: '#818cf8' },
     reviewed:    { bg: 'rgba(245,158,11,0.12)',  color: '#fbbf24' },
     shortlisted: { bg: 'rgba(16,185,129,0.12)',  color: '#34d399' },
+    hired:       { bg: 'rgba(167,139,250,0.12)', color: '#a78bfa' },
     rejected:    { bg: 'rgba(248,113,113,0.10)', color: '#f87171' },
+    withdrawn:   { bg: 'rgba(107,114,128,0.1)',  color: '#6b7280' },
   };
   const c = map[s] || map.pending;
-  return { padding: '0.2rem 0.7rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.color}33` };
+  return {
+    padding: '0.2rem 0.7rem', borderRadius: '999px', fontSize: '0.75rem',
+    fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.color}33`,
+  };
+};
+
+const tagStyle = {
+  display: 'inline-block', padding: '0.15rem 0.55rem',
+  background: 'rgba(99,102,241,0.1)', color: '#818cf8',
+  border: '1px solid rgba(99,102,241,0.2)', borderRadius: '999px',
+  fontSize: '0.72rem', marginRight: '0.3rem', marginBottom: '0.3rem',
 };
 
 export default function CandidatesPage() {
   const { jobId } = useParams();
-  const { API_BASE } = useAuth();
-  const token = localStorage.getItem('token');
 
   const [data,     setData]     = useState(null);
   const [loading,  setLoading]  = useState(true);
@@ -27,33 +37,30 @@ export default function CandidatesPage() {
   const [updating, setUpdating] = useState(null);
   const [tab,      setTab]      = useState('applications');
   const [matched,  setMatched]  = useState(null);
-  const [noteEdit, setNoteEdit] = useState({});   // appId -> draft note string
+  const [noteEdit, setNoteEdit] = useState({});
 
   useEffect(() => {
     (async () => {
       try {
-        const headers = { Authorization: `Bearer ${token}` };
         const [appsRes, matchRes] = await Promise.all([
-          axios.get(`${API_BASE}/api/applications/job/${jobId}`, { headers }),
-          axios.get(`${API_BASE}/api/match/job/${jobId}/candidates`, { headers }),
+          getAppsForJob(jobId),
+          getCandidates(jobId).catch(() => ({ data: { candidates: [] } })),
         ]);
         setData(appsRes.data);
         setMatched(matchRes.data);
       } catch (err) {
-        setError(err.response?.data?.message || 'Failed to load');
-      } finally { setLoading(false); }
+        setError(err.response?.data?.message || 'Failed to load candidates');
+      } finally {
+        setLoading(false);
+      }
     })();
-  }, [API_BASE, jobId, token]);
+  }, [jobId]);
 
-  const updateStatus = async (appId, status) => {
+  const handleStatusUpdate = async (appId, status) => {
     setUpdating(appId);
     const note = noteEdit[appId] ?? data.applications.find(a => a._id === appId)?.recruiterNote ?? '';
     try {
-      await axios.patch(
-        `${API_BASE}/api/applications/${appId}/status`,
-        { status, recruiterNote: note },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await updateAppStatus(appId, { status, recruiterNote: note });
       setData(prev => ({
         ...prev,
         applications: prev.applications.map(a =>
@@ -61,28 +68,23 @@ export default function CandidatesPage() {
         ),
       }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Update failed');
-    } finally { setUpdating(null); }
+      alert(err.response?.data?.message || 'Status update failed');
+    } finally {
+      setUpdating(null);
+    }
   };
 
-  if (loading) return <div className="card"><p>Loading candidates…</p></div>;
+  if (loading) return <div className="card"><p style={{ color: '#9ca3af' }}>⏳ Loading candidates…</p></div>;
   if (error)   return <div className="card"><p style={{ color: '#f87171' }}>{error}</p><Link to="/recruiter/jobs">← Back</Link></div>;
 
   const { job, applications } = data;
-
-  const tagStyle = {
-    display: 'inline-block', padding: '0.15rem 0.55rem',
-    background: 'rgba(99,102,241,0.1)', color: '#818cf8',
-    border: '1px solid rgba(99,102,241,0.2)', borderRadius: '999px',
-    fontSize: '0.72rem', marginRight: '0.3rem', marginBottom: '0.3rem',
-  };
 
   return (
     <div style={{ maxWidth: 920, width: '100%' }}>
       <Link to="/recruiter/jobs" style={{ color: '#6b7280', fontSize: '0.85rem' }}>← My Jobs</Link>
 
       <div style={{ margin: '0.85rem 0 1.25rem' }}>
-        <h2 style={{ margin: '0 0 0.2rem' }}>{job.title}</h2>
+        <h2 style={{ margin: '0 0 0.2rem', color: '#e5e7eb' }}>{job.title}</h2>
         <p style={{ color: '#9ca3af', margin: 0, fontSize: '0.88rem' }}>{job.company}</p>
       </div>
 
@@ -93,7 +95,12 @@ export default function CandidatesPage() {
           ['matched',      `🤝 All Matched (${matched?.candidates?.length || 0})`],
         ].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
-            style={{ padding: '0.5rem 1.1rem', background: 'none', border: 'none', borderBottom: tab === id ? '2px solid #6366f1' : '2px solid transparent', color: tab === id ? '#818cf8' : '#4b5563', cursor: 'pointer', fontSize: '0.85rem', fontWeight: tab === id ? 600 : 400 }}>
+            style={{
+              padding: '0.5rem 1.1rem', background: 'none', border: 'none',
+              borderBottom: tab === id ? '2px solid #6366f1' : '2px solid transparent',
+              color: tab === id ? '#818cf8' : '#4b5563',
+              cursor: 'pointer', fontSize: '0.85rem', fontWeight: tab === id ? 600 : 400,
+            }}>
             {label}
           </button>
         ))}
@@ -106,11 +113,10 @@ export default function CandidatesPage() {
           : applications.map(app => (
             <div key={app._id} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '10px', padding: '1.1rem 1.3rem', marginBottom: '0.85rem' }}>
 
-              {/* Top row: name + match + status */}
+              {/* Top row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.6rem' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                    {/* ─── VIEW PROFILE LINK ─── */}
                     <Link
                       to={`/profile/${app.seeker._id}`}
                       style={{ fontWeight: 700, fontSize: '1rem', color: '#e5e7eb', textDecoration: 'none', borderBottom: '1px solid #374151' }}
@@ -130,8 +136,6 @@ export default function CandidatesPage() {
                     <div style={{ fontSize: '0.82rem', color: '#9ca3af', marginTop: '0.1rem', fontStyle: 'italic' }}>{app.profile.headline}</div>
                   )}
                 </div>
-
-                {/* Avatar */}
                 {app.profile?.avatarUrl && (
                   <img src={app.profile.avatarUrl} alt="" style={{ width: 44, height: 44, borderRadius: '50%', objectFit: 'cover', border: '2px solid #1f2937', flexShrink: 0 }} />
                 )}
@@ -152,7 +156,7 @@ export default function CandidatesPage() {
                 </div>
               )}
 
-              {/* Recruiter note input */}
+              {/* Recruiter note */}
               <div style={{ marginBottom: '0.75rem' }}>
                 <input
                   type="text"
@@ -163,22 +167,27 @@ export default function CandidatesPage() {
                 />
               </div>
 
-              {/* Status buttons */}
+              {/* Status action buttons */}
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 {STATUS_OPTS.map(s => (
                   <button key={s}
                     disabled={app.status === s || updating === app._id}
-                    onClick={() => updateStatus(app._id, s)}
-                    style={{ padding: '0.25rem 0.85rem', borderRadius: '6px', fontSize: '0.78rem', cursor: app.status === s ? 'default' : 'pointer', fontWeight: app.status === s ? 700 : 400, border: '1px solid', opacity: app.status === s ? 1 : 0.5, transition: 'opacity 0.15s', ...statusStyle(s) }}
+                    onClick={() => handleStatusUpdate(app._id, s)}
+                    style={{
+                      padding: '0.25rem 0.85rem', borderRadius: '6px', fontSize: '0.78rem',
+                      cursor: app.status === s ? 'default' : 'pointer',
+                      fontWeight: app.status === s ? 700 : 400,
+                      border: '1px solid', opacity: app.status === s ? 1 : 0.55,
+                      transition: 'opacity 0.15s', ...statusStyle(s),
+                    }}
                     onMouseEnter={e => { if (app.status !== s) e.currentTarget.style.opacity = '1'; }}
-                    onMouseLeave={e => { if (app.status !== s) e.currentTarget.style.opacity = '0.5'; }}
+                    onMouseLeave={e => { if (app.status !== s) e.currentTarget.style.opacity = '0.55'; }}
                   >
                     {app.status === s ? '✓ ' : ''}{s}
                     {s === 'shortlisted' && app.status !== s ? ' 📧' : ''}
+                    {s === 'hired'       && app.status !== s ? ' 🏆' : ''}
                   </button>
                 ))}
-
-                {/* View full profile button */}
                 <Link
                   to={`/profile/${app.seeker._id}`}
                   style={{ marginLeft: 'auto', padding: '0.25rem 0.85rem', background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600 }}
@@ -187,18 +196,16 @@ export default function CandidatesPage() {
                 </Link>
               </div>
 
-              {/* Shortlist notice */}
-              {app.status !== 'shortlisted' && (
-                <p style={{ fontSize: '0.72rem', color: '#4b5563', marginTop: '0.55rem', margin: '0.55rem 0 0' }}>
-                  💡 Shortlisting will send your contact email to the candidate automatically.
-                </p>
+              {/* Status notice */}
+              {app.status === 'hired' && (
+                <p style={{ fontSize: '0.72rem', color: '#a78bfa', marginTop: '0.55rem', margin: '0.55rem 0 0' }}>🏆 Candidate marked as hired.</p>
               )}
               {app.status === 'shortlisted' && (
-                <p style={{ fontSize: '0.72rem', color: '#34d399', marginTop: '0.55rem', margin: '0.55rem 0 0' }}>
-                  ✅ Your contact email was shared with this candidate when shortlisted.
-                </p>
+                <p style={{ fontSize: '0.72rem', color: '#34d399', marginTop: '0.55rem', margin: '0.55rem 0 0' }}>✅ Your contact email was shared with this candidate when shortlisted.</p>
               )}
-
+              {!['shortlisted','hired'].includes(app.status) && (
+                <p style={{ fontSize: '0.72rem', color: '#4b5563', marginTop: '0.55rem', margin: '0.55rem 0 0' }}>💡 Shortlisting will send your contact email to the candidate automatically.</p>
+              )}
             </div>
           ))
       )}
@@ -208,12 +215,11 @@ export default function CandidatesPage() {
         !matched?.candidates?.length
           ? <p style={{ color: '#4b5563' }}>No matched candidates found.</p>
           : matched.candidates.map((c, idx) => (
-            <div key={c.userId} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '0.75rem' }}>
+            <div key={c.userId || idx} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <div>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <span style={{ color: '#4b5563', fontSize: '0.78rem' }}>#{idx + 1}</span>
-                    {/* ─── VIEW PROFILE IN MATCHED TAB TOO ─── */}
                     <Link to={`/profile/${c.userId}`} style={{ fontWeight: 600, color: '#e5e7eb', fontSize: '0.95rem' }}>
                       {c.name}
                     </Link>
