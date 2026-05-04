@@ -12,10 +12,10 @@ const applicationSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // Status pipeline
+    // Status pipeline — MUST match applicationController allowed list
     status: {
       type: String,
-      enum: ['pending', 'reviewed', 'shortlisted', 'rejected'],
+      enum: ['pending', 'reviewed', 'shortlisted', 'rejected', 'hired', 'withdrawn'],
       default: 'pending',
     },
     // Optional cover note from seeker
@@ -28,7 +28,7 @@ const applicationSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // Match score at time of application (snapshot)
+    // Match score at time of application (snapshot, re-computed by matchController)
     matchScore: {
       type: Number,
       default: 0,
