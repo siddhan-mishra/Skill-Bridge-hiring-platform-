@@ -8,8 +8,9 @@ import numpy as np
 from spacy.matcher import PhraseMatcher
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from skillNer.skill_extractor_class import SkillExtractor
 import pdfplumber
 from google import genai as genai_new
@@ -23,7 +24,7 @@ except ImportError:
     from skillNer.utils import load_skill_db
     SKILL_DB = load_skill_db()
 
-# ── Sentence Transformers (lazy-loaded on first use to keep startup fast) ────
+# ── Sentence Transformers (lazy-loaded on first use) ────────────────────────
 _sbert_model = None
 
 def get_sbert():
@@ -52,20 +53,13 @@ if not _key:
     raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
 gemini = genai_new.Client(api_key=_key)
 
-# ── Gemini model fallback chain ────────────────────────────────────────────
-# VERIFIED working model IDs as of May 2026 via Google AI Studio ListModels
-# REMOVED: gemini-2.5-flash-preview-05-20 (NOT_FOUND — wrong date suffix)
-# REMOVED: gemini-1.5-flash (deprecated Jan 2026, returns 404 on v1beta)
-# Strategy: try newest fastest first, fallback to stable 1.5-pro last resort
 GEMINI_MODELS = [
-    "gemini-2.0-flash",           # fastest, high quota  → primary
-    "gemini-2.0-flash-lite",      # cheaper, lower latency → secondary
-    "gemini-2.5-flash-preview-04-17",  # latest preview (correct date suffix)
-    "gemini-1.5-pro",             # stable, always works, slower → last resort
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash-preview-04-17",
+    "gemini-1.5-pro",
 ]
 
-# ── BONUS EXPANSION MAP ──────────────────────────────────────────────────
-# When a seeker writes "MERN" we expand to all component skills for matching.
 BONUS_EXPANSIONS = {
     'mern':       ['mongodb', 'express', 'react', 'node'],
     'mean':       ['mongodb', 'express', 'angular', 'node'],
@@ -99,13 +93,32 @@ class MatchRequest(BaseModel):
     requiredYears: Optional[int] = 0
     educationMatch: Optional[float] = 0.5
 
+class ResumeRequest(BaseModel):
+    name:          str
+    email:         Optional[str] = ""
+    phone:         Optional[str] = ""
+    location:      Optional[str] = ""
+    linkedinUrl:   Optional[str] = ""
+    githubUrl:     Optional[str] = ""
+    portfolioUrl:  Optional[str] = ""
+    headline:      Optional[str] = ""
+    summary:       Optional[str] = ""
+    skills:        Optional[List[str]] = []
+    techStack:     Optional[List[str]] = []
+    softSkills:    Optional[List[str]] = []
+    workHistory:   Optional[List[Dict[str, Any]]] = []
+    education:     Optional[List[Dict[str, Any]]] = []
+    projects:      Optional[List[Dict[str, Any]]] = []
+    certifications: Optional[List[Dict[str, Any]]] = []
+    languages:     Optional[List[str]] = []
+    yearsOfExp:    Optional[int] = 0
+
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "models": GEMINI_MODELS}
 
 
-# ── SkillNer extraction (fast, no LLM) ────────────────────────────────────
 @app.post("/extract-skills", response_model=SkillsOut)
 def extract_skills(payload: TextIn):
     doc = skill_extractor.annotate(payload.text)
@@ -120,7 +133,6 @@ def extract_skills(payload: TextIn):
     return {"skills": sorted(skills)}
 
 
-# ── /suggest-skills : AI chip suggestions for job posting form ──────────────
 @app.post("/suggest-skills")
 async def suggest_skills(payload: SkillSuggestIn):
     if not payload.title and not payload.description:
@@ -147,36 +159,18 @@ Return ONLY the JSON array:"""
         raw = call_gemini(PROMPT)
         raw = strip_fences(raw)
         parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            skills = parsed.get("skills", [])
-        elif isinstance(parsed, list):
-            skills = parsed
-        else:
-            skills = []
+        skills = parsed if isinstance(parsed, list) else parsed.get("skills", [])
         skills = [str(s).strip()[:50] for s in skills if s]
-        print(f"[suggest-skills] returned {len(skills)} skills")
         return {"skills": skills}
     except Exception as ex:
         print(f"[suggest-skills] error: {ex}")
         return {"skills": [], "error": str(ex)}
 
 
-# ── /compute-match : Hybrid SBERT + skill + experience matching ─────────────
-# Scoring formula (research-backed, inspired by LinkedIn Talent Insights):
-#   40% → SBERT cosine similarity  (semantic understanding of full texts)
-#   40% → Skill match ratio        (synonym+fuzzy+bonus expansion aware)
-#   20% → Experience + education   (structured requirement matching)
-#
-# References:
-#   - sentence-transformers all-MiniLM-L6-v2 (Hugging Face, 80MB, fast)
-#   - "Learning to Retrieve for Job Matching" arXiv 2402.13435
-#   - "SBERT-NLP Framework for Job Matching" JETIR2602011
 @app.post("/compute-match")
 async def compute_match(req: MatchRequest):
     try:
         sbert = get_sbert()
-
-        # 1. SBERT cosine similarity ──────────────────────────────────────────
         from sklearn.metrics.pairwise import cosine_similarity
 
         profile_emb = sbert.encode([req.profileText], normalize_embeddings=True)
@@ -184,7 +178,6 @@ async def compute_match(req: MatchRequest):
         sbert_score = float(cosine_similarity(profile_emb, job_emb)[0][0])
         sbert_score = max(0.0, sbert_score)
 
-        # 2. Skill match ratio ─────────────────────────────────────────────────
         def expand_skills(skill_list):
             expanded = set()
             for s in skill_list:
@@ -211,7 +204,6 @@ async def compute_match(req: MatchRequest):
                           if ps not in job_set and
                           not any(_fuzzy(ps, js) for js in job_set)]
 
-        # 3. Experience + education score ──────────────────────────────────────
         exp_years = req.profileYears or 0
         req_years = req.requiredYears or 0
         if req_years == 0:
@@ -226,16 +218,10 @@ async def compute_match(req: MatchRequest):
         edu_score = req.educationMatch
         structured_score = (exp_score * 0.6) + (edu_score * 0.4)
 
-        # 4. Weighted hybrid final score ───────────────────────────────────────
-        final_raw = (
-            0.40 * sbert_score +
-            0.40 * skill_score +
-            0.20 * structured_score
-        )
+        final_raw = (0.40 * sbert_score + 0.40 * skill_score + 0.20 * structured_score)
         final_pct = round(final_raw * 100)
 
-        print(f"[compute-match] sbert={sbert_score:.3f} skill={skill_score:.3f} "
-              f"struct={structured_score:.3f} → final={final_pct}%")
+        print(f"[compute-match] sbert={sbert_score:.3f} skill={skill_score:.3f} struct={structured_score:.3f} → {final_pct}%")
 
         return {
             "score": final_pct,
@@ -248,20 +234,268 @@ async def compute_match(req: MatchRequest):
             "missingSkills": missing_skills,
             "extraSkills":   list(extra_skills)[:10],
         }
-
     except Exception as ex:
         print(f"[compute-match] error: {ex}")
         return {"score": -1, "error": str(ex)}
 
 
+# ── /generate-resume — Harvard-format .docx generation ───────────────────
+# Flow:
+#   1. Build a detailed prompt with profile JSON → Gemini returns polished
+#      Harvard-style bullet content (tightened, action-verb led)
+#   2. python-docx renders the layout: name header, horizontal rule, sections
+#   3. Returns .docx as a streaming binary response (nothing stored on disk)
+#
+# Harvard format reference: careerservices.fas.harvard.edu/resources/create-a-resume
+@app.post("/generate-resume")
+async def generate_resume(req: ResumeRequest):
+    # ── Step 1: Ask Gemini to polish & format the content ─────────────────
+    profile_json = req.model_dump()
+    PROMPT = f"""You are a Harvard Career Services resume writer. Given the raw profile data below,
+write polished resume content following Harvard format rules:
+
+RULES:
+1. Return ONLY a raw JSON object — no markdown, no backticks.
+2. summary: 2-3 concise sentences, 3rd person, professional tone.
+3. workHistory: for each job, rewrite achievements as 2-4 action-verb led bullet strings.
+   Use strong verbs: Built, Engineered, Reduced, Increased, Led, Designed, Deployed.
+   Add measurable impact where possible: "Reduced API latency by 40%".
+4. skills_line: single comma-separated string of top 12 technical skills.
+5. projects: for each project, write 1-2 bullet impact strings.
+6. If a field is empty/missing, return empty string or empty array — never null.
+7. Do NOT invent companies, dates, or facts not in the profile.
+
+EXACT OUTPUT FORMAT:
+{{
+  "summary": "Experienced full-stack developer...",
+  "skills_line": "JavaScript, React, Node.js, Python, MongoDB, Docker, AWS, Git",
+  "workHistory": [
+    {{
+      "role": "Software Engineer",
+      "company": "Google",
+      "startDate": "Jan 2021",
+      "endDate": "Present",
+      "bullets": ["Built REST APIs handling 10M+ daily requests", "Reduced deployment time by 60%"]
+    }}
+  ],
+  "projects": [
+    {{
+      "title": "SkillBridge",
+      "technologies": "React, Node.js, MongoDB",
+      "bullets": ["Engineered AI matching engine with 85% accuracy"]
+    }}
+  ]
+}}
+
+RAW PROFILE:
+{json.dumps(profile_json, indent=2)[:6000]}
+
+Return ONLY the JSON:"""
+
+    ai_content = {}
+    try:
+        raw = call_gemini(PROMPT)
+        raw = strip_fences(raw)
+        ai_content = json.loads(raw)
+        print(f"[generate-resume] Gemini OK for {req.name}")
+    except Exception as ex:
+        print(f"[generate-resume] Gemini error, using raw profile data: {ex}")
+        # Graceful fallback: use raw profile data as-is
+        ai_content = {
+            "summary": req.summary or "",
+            "skills_line": ", ".join((req.skills or [])[:12]),
+            "workHistory": [
+                {"role": w.get("role",""), "company": w.get("company",""),
+                 "startDate": w.get("startDate",""), "endDate": w.get("endDate",""),
+                 "bullets": w.get("achievements", [])}
+                for w in (req.workHistory or [])
+            ],
+            "projects": [
+                {"title": p.get("title",""), "technologies": ", ".join(p.get("technologies",[]) if isinstance(p.get("technologies"), list) else [p.get("technologies","")]),
+                 "bullets": [p.get("description","")]}
+                for p in (req.projects or [])
+            ],
+        }
+
+    # ── Step 2: Build .docx with python-docx ─────────────────────────────
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    import copy
+
+    doc = Document()
+
+    # Page margins: 1 inch all sides (Harvard standard)
+    for section in doc.sections:
+        section.top_margin    = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin   = Inches(1)
+        section.right_margin  = Inches(1)
+
+    def set_font(run, size=11, bold=False, color=None):
+        run.font.name  = "Garamond"
+        run.font.size  = Pt(size)
+        run.font.bold  = bold
+        if color:
+            run.font.color.rgb = RGBColor(*color)
+
+    def add_hrule(doc):
+        """Add a full-width horizontal line (Harvard-style section divider)."""
+        p  = doc.add_paragraph()
+        pr = p._p.get_or_add_pPr()
+        pb = OxmlElement('w:pBdr')
+        bottom = OxmlElement('w:bottom')
+        bottom.set(qn('w:val'), 'single')
+        bottom.set(qn('w:sz'),  '6')
+        bottom.set(qn('w:space'), '1')
+        bottom.set(qn('w:color'), '000000')
+        pb.append(bottom)
+        pr.append(pb)
+        p.paragraph_format.space_after = Pt(4)
+
+    def add_section_heading(doc, title):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(8)
+        p.paragraph_format.space_after  = Pt(2)
+        run = p.add_run(title.upper())
+        set_font(run, size=11, bold=True)
+        add_hrule(doc)
+
+    def add_bullet(doc, text, indent=0.25):
+        p = doc.add_paragraph(style='List Bullet')
+        p.paragraph_format.left_indent  = Inches(indent)
+        p.paragraph_format.space_after  = Pt(2)
+        run = p.add_run(text)
+        set_font(run, size=10.5)
+
+    # ── NAME (centered, 16pt bold) ──────────────────────────────────────
+    name_p = doc.add_paragraph()
+    name_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name_p.paragraph_format.space_after = Pt(2)
+    name_run = name_p.add_run(req.name or "")
+    set_font(name_run, size=16, bold=True)
+
+    # ── CONTACT LINE (centered, 10pt) ──────────────────────────────
+    contact_parts = [p for p in [
+        req.phone, req.email, req.location,
+        req.linkedinUrl, req.githubUrl, req.portfolioUrl
+    ] if p]
+    contact_p = doc.add_paragraph()
+    contact_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    contact_p.paragraph_format.space_after = Pt(6)
+    contact_run = contact_p.add_run("  |  ".join(contact_parts))
+    set_font(contact_run, size=10)
+
+    # ── SUMMARY ────────────────────────────────────────────────────
+    summary_text = ai_content.get("summary") or req.summary or ""
+    if summary_text:
+        add_section_heading(doc, "Summary")
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        run = p.add_run(summary_text)
+        set_font(run, size=10.5)
+
+    # ── SKILLS ─────────────────────────────────────────────────────
+    skills_line = ai_content.get("skills_line") or ", ".join((req.skills or [])[:12])
+    if skills_line:
+        add_section_heading(doc, "Technical Skills")
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        run = p.add_run(skills_line)
+        set_font(run, size=10.5)
+
+    # ── EXPERIENCE ──────────────────────────────────────────────
+    ai_work = ai_content.get("workHistory") or []
+    if ai_work:
+        add_section_heading(doc, "Experience")
+        for job in ai_work:
+            # Role + Company on one line, dates right-aligned
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(1)
+            role_run = p.add_run(f"{job.get('role','')}, ")
+            set_font(role_run, size=11, bold=True)
+            company_run = p.add_run(job.get('company', ''))
+            set_font(company_run, size=11)
+            dates = f"{job.get('startDate','')} – {job.get('endDate','Present')}"
+            dates_run = p.add_run(f"  |  {dates}")
+            set_font(dates_run, size=10.5, color=(100, 100, 100))
+            for bullet in (job.get("bullets") or []):
+                if bullet:
+                    add_bullet(doc, bullet)
+
+    # ── EDUCATION ───────────────────────────────────────────────
+    if req.education:
+        add_section_heading(doc, "Education")
+        for edu in req.education:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(1)
+            deg_run = p.add_run(f"{edu.get('degree','')}, ")
+            set_font(deg_run, size=11, bold=True)
+            inst_run = p.add_run(edu.get('institute', ''))
+            set_font(inst_run, size=11)
+            yr = edu.get('year', '')
+            gpa = edu.get('gpa', '')
+            meta = " | ".join(filter(None, [yr, f"GPA: {gpa}" if gpa else ""]))
+            if meta:
+                meta_run = p.add_run(f"  |  {meta}")
+                set_font(meta_run, size=10.5, color=(100, 100, 100))
+
+    # ── PROJECTS ────────────────────────────────────────────────
+    ai_projects = ai_content.get("projects") or []
+    if ai_projects:
+        add_section_heading(doc, "Projects")
+        for proj in ai_projects:
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(1)
+            title_run = p.add_run(proj.get('title', ''))
+            set_font(title_run, size=11, bold=True)
+            tech = proj.get('technologies', '')
+            if tech:
+                tech_run = p.add_run(f"  —  {tech}")
+                set_font(tech_run, size=10.5, color=(100, 100, 100))
+            for bullet in (proj.get("bullets") or []):
+                if bullet:
+                    add_bullet(doc, bullet)
+
+    # ── CERTIFICATIONS ─────────────────────────────────────────
+    if req.certifications:
+        add_section_heading(doc, "Certifications")
+        for cert in req.certifications:
+            name = cert.get('name', '')
+            issuer = cert.get('issuer', '')
+            year   = cert.get('year', '')
+            line   = " | ".join(filter(None, [name, issuer, year]))
+            if line:
+                add_bullet(doc, line)
+
+    # ── LANGUAGES ─────────────────────────────────────────────
+    if req.languages:
+        add_section_heading(doc, "Languages")
+        p = doc.add_paragraph()
+        run = p.add_run(", ".join(req.languages))
+        set_font(run, size=10.5)
+
+    # ── Stream .docx as binary response (no disk I/O) ─────────────────
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    safe_name = re.sub(r'[^\w\s-]', '', req.name or 'Resume').replace(' ', '_')
+    filename  = f"{safe_name}_Resume.docx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def _fuzzy(a: str, b: str) -> bool:
-    """Simple edit-distance fuzzy match for short canonical skill names."""
-    if a == b:
-        return True
-    if len(a) <= 3 or len(b) <= 3:
-        return False
-    if abs(len(a) - len(b)) > 2:
-        return False
+    if a == b: return True
+    if len(a) <= 3 or len(b) <= 3: return False
+    if abs(len(a) - len(b)) > 2: return False
     m, n = len(a), len(b)
     dp = list(range(n + 1))
     for i in range(1, m + 1):
@@ -272,7 +506,6 @@ def _fuzzy(a: str, b: str) -> bool:
     return dp[n] <= 1
 
 
-# ── PDF text extraction ──────────────────────────────────────────────────
 def pdf_to_text(data: bytes) -> str:
     text = ""
     with pdfplumber.open(io.BytesIO(data)) as pdf:
@@ -283,7 +516,6 @@ def pdf_to_text(data: bytes) -> str:
     return text.strip()
 
 
-# ── Regex contact extractors ───────────────────────────────────────────────
 def rx_email(t):     m = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', t);                 return m.group(0) if m else None
 def rx_phone(t):     m = re.search(r'(\+?\d[\d\s\-().]{7,}\d)', t);              return m.group(0).strip() if m else None
 def rx_linkedin(t):  m = re.search(r'linkedin\.com/in/[\w\-]+', t, re.I);         return "https://" + m.group(0) if m else None
@@ -293,7 +525,6 @@ def rx_portfolio(t):
     return hits[0] if hits else None
 
 
-# ── Gemini call with model fallback + smart 429 backoff ─────────────────────
 def call_gemini(prompt: str) -> str:
     last_err = None
     for attempt, model in enumerate(GEMINI_MODELS):
@@ -306,20 +537,15 @@ def call_gemini(prompt: str) -> str:
             msg = str(ex)
             last_err = ex
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                # Parse retryDelay from Google's error message if present
-                delay = 8  # default
+                delay = 8
                 m = re.search(r'retryDelay.*?(\d+)s', msg)
-                if m:
-                    delay = min(int(m.group(1)), 15)
-                # Add jitter to avoid thundering herd
-                jitter = attempt * 2
-                total_delay = delay + jitter
-                print(f"[gemini] 429 on {model}, waiting {total_delay}s before next model")
+                if m: delay = min(int(m.group(1)), 15)
+                total_delay = delay + attempt * 2
+                print(f"[gemini] 429 on {model}, waiting {total_delay}s")
                 time.sleep(total_delay)
                 continue
             elif "404" in msg or "NOT_FOUND" in msg:
-                # Wrong model ID — skip immediately, do NOT retry or wait
-                print(f"[gemini] 404 on {model} (model not found) — skipping")
+                print(f"[gemini] 404 on {model} — skipping")
                 continue
             else:
                 print(f"[gemini] error on {model}: {ex}")
@@ -328,19 +554,16 @@ def call_gemini(prompt: str) -> str:
 
 
 def strip_fences(raw: str) -> str:
-    if "```" not in raw:
-        return raw
+    if "```" not in raw: return raw
     parts = raw.split("```")
     for part in parts:
         p = part.strip()
-        if p.startswith("json"):
-            p = p[4:].strip()
+        if p.startswith("json"): p = p[4:].strip()
         if p.startswith("{") or p.startswith("["):
             return p
     return raw
 
 
-# ── /parse-resume : Gemini ONLY (SkillNer too slow on full PDF) ─────────────
 @app.post("/parse-resume")
 async def parse_resume(file: UploadFile = File(...)):
     content = await file.read()
@@ -427,11 +650,8 @@ RESUME TEXT:
         raw = call_gemini(PROMPT)
         raw = strip_fences(raw)
         parsed = json.loads(raw)
-        print(f"[parse-resume] OK name={parsed.get('fullName')} skills={len(parsed.get('skills', []))}")
-    except json.JSONDecodeError as je:
-        print(f"[parse-resume] JSON parse error: {je}")
     except Exception as ex:
-        print(f"[parse-resume] All models failed: {ex}")
+        print(f"[parse-resume] error: {ex}")
 
     return {
         "fullName":       parsed.get("fullName"),

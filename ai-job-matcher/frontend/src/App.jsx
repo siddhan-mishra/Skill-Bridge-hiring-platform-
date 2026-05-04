@@ -4,6 +4,7 @@ import LoginPage from './auth/LoginPage';
 import RegisterPage from './auth/RegisterPage';
 import ProfilePage from './profile/ProfilePage';
 import PublicProfilePage from './profile/PublicProfilePage';
+import ProfileGuard from './profile/ProfileGuard';
 import JobCreatePage from './jobs/JobCreatePage';
 import JobListPage from './jobs/JobListPage';
 import MatchedJobsPage from './match/MatchedJobsPage';
@@ -75,24 +76,34 @@ function OwnProfileRedirect() {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/"                                    element={<HomePage />} />
-      <Route path="/login"                               element={<LoginPage />} />
-      <Route path="/register"                            element={<RegisterPage />} />
-      <Route path="/profile/edit"                        element={<ProfilePage />} />
-      <Route path="/profile/:userId"                     element={<PublicProfilePage />} />
-      <Route path="/profile"                             element={<OwnProfileRedirect />} />
-      <Route path="/dashboard"                           element={<SeekerDashboard />} />
-      <Route path="/applications"                        element={<ApplicationsPage />} />
-      <Route path="/recruiter/dashboard"                 element={<RecruiterDashboard />} />
-      <Route path="/recruiter/applications"              element={<AllApplicationsPage />} />
-      <Route path="/jobs"                                element={<JobListPage />} />
-      <Route path="/jobs/new"                            element={<JobCreatePage />} />
-      <Route path="/jobs/:id"                            element={<JobDetailPage />} />
-      <Route path="/jobs/:id/edit"                       element={<JobEditPage />} />
-      <Route path="/recruiter/jobs"                      element={<RecruiterJobsPage />} />
-      <Route path="/recruiter/jobs/:jobId/candidates"    element={<CandidatesPage />} />
-      <Route path="/matches"                             element={<MatchedJobsPage />} />
-      <Route path="*"                                    element={<Navigate to="/" />} />
+      {/* Public */}
+      <Route path="/"          element={<HomePage />} />
+      <Route path="/login"     element={<LoginPage />} />
+      <Route path="/register"  element={<RegisterPage />} />
+      <Route path="/jobs"      element={<JobListPage />} />
+      <Route path="/jobs/new"  element={<JobCreatePage />} />
+      <Route path="/jobs/:id"  element={<JobDetailPage />} />
+
+      {/* Seeker routes — wrapped in ProfileGuard */}
+      <Route path="/dashboard"    element={<ProfileGuard><SeekerDashboard /></ProfileGuard>} />
+      <Route path="/matches"      element={<ProfileGuard><MatchedJobsPage /></ProfileGuard>} />
+      <Route path="/applications" element={<ProfileGuard><ApplicationsPage /></ProfileGuard>} />
+
+      {/* Profile */}
+      <Route path="/profile/edit"   element={<ProfilePage />} />
+      <Route path="/profile/:userId" element={<PublicProfilePage />} />
+      <Route path="/profile"         element={<OwnProfileRedirect />} />
+
+      {/* Job edit */}
+      <Route path="/jobs/:id/edit" element={<JobEditPage />} />
+
+      {/* Recruiter routes */}
+      <Route path="/recruiter/dashboard"              element={<RecruiterDashboard />} />
+      <Route path="/recruiter/applications"           element={<AllApplicationsPage />} />
+      <Route path="/recruiter/jobs"                   element={<RecruiterJobsPage />} />
+      <Route path="/recruiter/jobs/:jobId/candidates" element={<CandidatesPage />} />
+
+      <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
 }
