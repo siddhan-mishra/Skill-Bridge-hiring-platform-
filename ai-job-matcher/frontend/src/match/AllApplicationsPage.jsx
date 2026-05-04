@@ -1,154 +1,188 @@
-// AllApplicationsPage.jsx — recruiter sees ALL applications across all jobs, filterable by status
+// AllApplicationsPage.jsx — Recruiter: all applications across all jobs
+// Step 3: restored shortlisted/rejected status display, match score,
+// inline status change actions, filter by status and job
 import { useEffect, useState, useMemo } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../auth/AuthContext';
 
-const STATUS_OPTS = ['all', 'pending', 'reviewed', 'shortlisted', 'rejected'];
-
-const statusStyle = (s) => {
-  const map = {
-    pending:     { bg: 'rgba(99,102,241,0.12)',  color: '#818cf8' },
-    reviewed:    { bg: 'rgba(245,158,11,0.12)',  color: '#fbbf24' },
-    shortlisted: { bg: 'rgba(16,185,129,0.12)',  color: '#34d399' },
-    rejected:    { bg: 'rgba(248,113,113,0.10)', color: '#f87171' },
-  };
-  const c = map[s] || map.pending;
-  return { padding: '0.2rem 0.7rem', borderRadius: '999px', fontSize: '0.74rem', fontWeight: 600, background: c.bg, color: c.color, border: `1px solid ${c.color}33` };
+const STATUS_COLORS = {
+  pending:     { color: '#fbbf24', bg: 'rgba(245,158,11,0.1)',   border: 'rgba(245,158,11,0.25)'   },
+  shortlisted: { color: '#34d399', bg: 'rgba(16,185,129,0.1)',   border: 'rgba(16,185,129,0.25)'   },
+  rejected:    { color: '#f87171', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.25)'    },
+  hired:       { color: '#818cf8', bg: 'rgba(99,102,241,0.1)',   border: 'rgba(99,102,241,0.25)'   },
+  withdrawn:   { color: '#6b7280', bg: 'rgba(107,114,128,0.1)', border: 'rgba(107,114,128,0.25)'  },
 };
+
+const STATUS_OPTS = ['all', 'pending', 'shortlisted', 'rejected', 'hired'];
 
 export default function AllApplicationsPage() {
   const { user, API_BASE } = useAuth();
   const token = localStorage.getItem('token');
-  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [jobs,    setJobs]    = useState([]);
-  const [apps,    setApps]    = useState([]);   // flat list: { ...app, jobTitle, jobCompany, jobId }
+  const [apps,    setApps]    = useState([]);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(null);
-
-  const filterParam = searchParams.get('filter') || 'all';
-  const [filter, setFilter] = useState(filterParam);
-
-  useEffect(() => { setFilter(searchParams.get('filter') || 'all'); }, [searchParams]);
+  const [error,   setError]   = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [jobFilter,    setJobFilter]    = useState('all');
+  const [updating, setUpdating] = useState({});
 
   useEffect(() => {
     if (user?.role !== 'recruiter') { setLoading(false); return; }
     (async () => {
       try {
-        const headers = { Authorization: `Bearer ${token}` };
-        // Fetch recruiter's jobs, then all applications for each job in parallel
-        const jobsRes = await axios.get(`${API_BASE}/api/jobs/my`, { headers });
-        const myJobs  = jobsRes.data;
-        setJobs(myJobs);
-
-        const appsPerJob = await Promise.all(
-          myJobs.map(j =>
-            axios.get(`${API_BASE}/api/applications/job/${j._id}`, { headers })
-              .then(r => (r.data.applications || []).map(a => ({ ...a, jobTitle: j.title, jobCompany: j.company, jobId: j._id })))
-              .catch(() => [])
-          )
-        );
-        setApps(appsPerJob.flat().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
-      } catch (err) { console.error(err); }
-      finally { setLoading(false); }
+        const res = await axios.get(`${API_BASE}/api/applications/recruiter/all`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setApps(res.data);
+      } catch (err) {
+        setError(err.response?.data?.message || 'Failed to load applications');
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [API_BASE, user, token]);
 
-  const updateStatus = async (appId, status, jobId) => {
-    setUpdating(appId);
+  // Unique job titles for filter dropdown
+  const jobTitles = useMemo(() => {
+    const titles = new Map();
+    apps.forEach(a => {
+      if (a.job?._id) titles.set(a.job._id, a.job.title || 'Untitled');
+    });
+    return [['all', 'All Jobs'], ...titles.entries()];
+  }, [apps]);
+
+  const filtered = useMemo(() => {
+    let list = [...apps];
+    if (statusFilter !== 'all') list = list.filter(a => a.status === statusFilter);
+    if (jobFilter   !== 'all') list = list.filter(a => a.job?._id === jobFilter);
+    return list;
+  }, [apps, statusFilter, jobFilter]);
+
+  const updateStatus = async (appId, newStatus) => {
+    setUpdating(u => ({ ...u, [appId]: true }));
     try {
-      await axios.patch(
-        `${API_BASE}/api/applications/${appId}/status`,
-        { status },
+      const res = await axios.put(`${API_BASE}/api/applications/${appId}/status`,
+        { status: newStatus },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setApps(prev => prev.map(a => a._id === appId ? { ...a, status } : a));
-    } catch (err) { alert(err.response?.data?.message || 'Update failed'); }
-    finally { setUpdating(null); }
+      setApps(prev => prev.map(a => a._id === appId ? { ...a, status: res.data.status } : a));
+    } catch (err) {
+      alert('Update failed: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setUpdating(u => ({ ...u, [appId]: false }));
+    }
   };
 
-  const displayed = useMemo(() =>
-    filter === 'all' ? apps : apps.filter(a => a.status === filter),
-    [apps, filter]
-  );
+  const scoreColor = (s) => s >= 75 ? '#34d399' : s >= 50 ? '#fbbf24' : s >= 25 ? '#f97316' : '#f87171';
 
-  if (!user || user.role !== 'recruiter') return <div className="card"><p>Recruiters only.</p></div>;
-  if (loading) return <div className="card"><p>Loading…</p></div>;
+  const inp = { background: '#0f172a', color: '#e5e7eb', border: '1px solid #1f2937', borderRadius: 7, padding: '0.4rem 0.65rem', fontSize: '0.85rem', outline: 'none', fontFamily: 'inherit' };
+
+  if (!user || user.role !== 'recruiter')
+    return <div className="card"><p style={{ color: '#f87171' }}>Only recruiters can view this page.</p></div>;
+  if (loading) return <div className="card"><p style={{ color: '#9ca3af' }}>⏳ Loading applications…</p></div>;
+  if (error)   return <div className="card"><p style={{ color: '#f87171' }}>{error}</p></div>;
 
   return (
-    <div style={{ maxWidth: 920, width: '100%' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <div>
-          <h2 style={{ margin: '0 0 0.2rem' }}>All Applications</h2>
-          <p style={{ color: '#6b7280', margin: 0, fontSize: '0.85rem' }}>{displayed.length} application{displayed.length !== 1 ? 's' : ''} shown</p>
+    <div style={{ maxWidth: 900, width: '100%' }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: '1.25rem' }}>
+        <h2 style={{ color: '#e5e7eb', margin: 0 }}>📥 All Applications</h2>
+        <p style={{ color: '#4b5563', fontSize: '0.83rem', marginTop: '0.2rem' }}>{apps.length} total · {filtered.length} showing</p>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' }}>
+        <select style={inp} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          {STATUS_OPTS.map(s => <option key={s} value={s}>{s === 'all' ? 'All Statuses' : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+        </select>
+        <select style={{ ...inp, maxWidth: 220 }} value={jobFilter} onChange={e => setJobFilter(e.target.value)}>
+          {jobTitles.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+        </select>
+        {/* Status counts */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
+          {['pending','shortlisted','rejected','hired'].map(s => {
+            const count = apps.filter(a => a.status === s).length;
+            if (!count) return null;
+            const c = STATUS_COLORS[s];
+            return <span key={s} style={{ padding: '0.18rem 0.65rem', background: c.bg, color: c.color, border: `1px solid ${c.border}`, borderRadius: 999, fontSize: '0.75rem' }}>{s}: {count}</span>;
+          })}
         </div>
-        <Link to="/recruiter/dashboard" style={{ color: '#6b7280', fontSize: '0.85rem' }}>← Dashboard</Link>
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-        {STATUS_OPTS.map(s => (
-          <button key={s}
-            onClick={() => { setFilter(s); setSearchParams(s === 'all' ? {} : { filter: s }); }}
-            style={{ padding: '0.3rem 0.9rem', borderRadius: '999px', fontSize: '0.8rem', cursor: 'pointer', border: '1px solid', fontWeight: filter === s ? 700 : 400, ...( s === 'all' ? { background: filter === s ? '#6366f1' : 'transparent', color: filter === s ? 'white' : '#4b5563', borderColor: filter === s ? '#6366f1' : '#1f2937' } : { ...statusStyle(s), opacity: filter === s ? 1 : 0.55 }) }}
-          >
-            {s === 'all' ? '📋 All' : s} {s !== 'all' ? `(${apps.filter(a => a.status === s).length})` : `(${apps.length})`}
-          </button>
-        ))}
-      </div>
+      {/* Application rows */}
+      {filtered.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📨</div>
+          <p style={{ color: '#6b7280' }}>No applications match your filters.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          {filtered.map(app => {
+            const sc = STATUS_COLORS[app.status] || STATUS_COLORS.pending;
+            const score = app.matchScore ?? app.score ?? null;
+            return (
+              <div key={app._id} style={{ background: '#0a0f1e', border: '1px solid #1f2937', borderRadius: 10, padding: '1rem 1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
 
-      {displayed.length === 0 && (
-        <div className="card" style={{ textAlign: 'center', padding: '2.5rem' }}>
-          <p style={{ color: '#4b5563' }}>No applications {filter !== 'all' ? `with status "${filter}"` : ''} yet.</p>
+                  {/* Candidate info */}
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, color: '#e5e7eb' }}>
+                        {app.applicant?.name || 'Unknown Candidate'}
+                      </span>
+                      {score !== null && (
+                        <span style={{ fontWeight: 800, color: scoreColor(score), fontSize: '0.85rem' }}>
+                          {score}% match
+                        </span>
+                      )}
+                      <span style={{ padding: '0.15rem 0.55rem', background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 999, fontSize: '0.72rem', fontWeight: 600 }}>
+                        {app.status}
+                      </span>
+                    </div>
+                    <div style={{ color: '#6b7280', fontSize: '0.82rem', marginTop: '0.2rem' }}>
+                      {app.applicant?.email}
+                    </div>
+                    <div style={{ color: '#4b5563', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                      Applied to: <Link to={`/jobs/${app.job?._id}`} style={{ color: '#818cf8' }}>{app.job?.title || 'Unknown Job'}</Link>
+                      <span style={{ marginLeft: '0.5rem' }}>· {new Date(app.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                    </div>
+                  </div>
+
+                  {/* Status actions */}
+                  <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center', flexShrink: 0 }}>
+                    {app.applicant?._id && (
+                      <Link to={`/profile/${app.applicant._id}`}
+                        style={{ padding: '0.28rem 0.75rem', background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 6, fontSize: '0.78rem' }}>
+                        View Profile
+                      </Link>
+                    )}
+                    {app.status !== 'shortlisted' && (
+                      <button onClick={() => updateStatus(app._id, 'shortlisted')} disabled={updating[app._id]}
+                        style={{ padding: '0.28rem 0.75rem', background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 6, fontSize: '0.78rem', cursor: 'pointer' }}>
+                        ✓ Shortlist
+                      </button>
+                    )}
+                    {app.status !== 'hired' && app.status === 'shortlisted' && (
+                      <button onClick={() => updateStatus(app._id, 'hired')} disabled={updating[app._id]}
+                        style={{ padding: '0.28rem 0.75rem', background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 6, fontSize: '0.78rem', cursor: 'pointer' }}>
+                        🏆 Hire
+                      </button>
+                    )}
+                    {app.status !== 'rejected' && app.status !== 'hired' && (
+                      <button onClick={() => updateStatus(app._id, 'rejected')} disabled={updating[app._id]}
+                        style={{ padding: '0.28rem 0.75rem', background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, fontSize: '0.78rem', cursor: 'pointer' }}>
+                        × Reject
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        {displayed.map(app => (
-          <div key={app._id} style={{ background: '#070d1a', border: '1px solid #1f2937', borderRadius: '10px', padding: '1rem 1.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                  <Link to={`/profile/${app.seeker._id}`} style={{ fontWeight: 700, color: '#e5e7eb', fontSize: '0.95rem' }}>{app.seeker.name}</Link>
-                  <span style={statusStyle(app.status)}>{app.status}</span>
-                  <span style={{ fontSize: '0.76rem', color: '#6366f1' }}>{app.matchScore}% match</span>
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '0.15rem' }}>
-                  Applied to: <Link to={`/recruiter/jobs/${app.jobId}/candidates`} style={{ color: '#9ca3af' }}>{app.jobTitle}</Link>
-                  {app.jobCompany && <span> · {app.jobCompany}</span>}
-                </div>
-              </div>
-              <Link to={`/profile/${app.seeker._id}`} style={{ fontSize: '0.78rem', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', padding: '0.2rem 0.65rem', borderRadius: '6px', flexShrink: 0 }}>
-                👤 View Profile
-              </Link>
-            </div>
-
-            {app.profile?.skills?.length > 0 && (
-              <div style={{ marginBottom: '0.5rem' }}>
-                {app.profile.skills.slice(0, 8).map((s, i) => (
-                  <span key={i} style={{ display: 'inline-block', padding: '0.15rem 0.5rem', background: 'rgba(99,102,241,0.08)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.15)', borderRadius: '999px', fontSize: '0.72rem', marginRight: '0.3rem', marginBottom: '0.25rem' }}>{s}</span>
-                ))}
-              </div>
-            )}
-
-            {/* Quick status change */}
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-              {['reviewed', 'shortlisted', 'rejected'].map(s => (
-                <button key={s}
-                  disabled={app.status === s || updating === app._id}
-                  onClick={() => updateStatus(app._id, s, app.jobId)}
-                  style={{ padding: '0.22rem 0.75rem', borderRadius: '6px', fontSize: '0.76rem', cursor: app.status === s ? 'default' : 'pointer', fontWeight: app.status === s ? 700 : 400, border: '1px solid', opacity: app.status === s ? 1 : 0.5, ...statusStyle(s), transition: 'opacity 0.15s' }}
-                  onMouseEnter={e => { if (app.status !== s) e.currentTarget.style.opacity = '1'; }}
-                  onMouseLeave={e => { if (app.status !== s) e.currentTarget.style.opacity = '0.5'; }}
-                >
-                  {app.status === s ? '✓ ' : ''}{s}{s === 'shortlisted' ? ' 📧' : ''}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
