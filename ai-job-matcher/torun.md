@@ -17,7 +17,7 @@ npm install multer cloudinary multer-storage-cloudinary
 
 cd frontend && npm run dev
 
-cd backend && npm run dev
+cd backend && npm run dev or server.js
 
 cd ai-job-matcher/nlp-service
 uvicorn main:app --reload --port 8000
