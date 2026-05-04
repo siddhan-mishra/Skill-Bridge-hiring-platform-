@@ -3,7 +3,6 @@ const router  = express.Router();
 const {
   createJob,
   getAllJobs,
-  listJobs,
   getJobById,
   updateJob,
   deleteJob,
@@ -12,17 +11,21 @@ const {
 } = require('../controllers/jobController');
 const { protect } = require('../middleware/authMiddleware');
 
-// Public
-router.get('/',        getAllJobs);
-router.get('/:id',     getJobById);
+// ── CRITICAL: specific routes MUST come before /:id param routes ─────────────
+// If /:id is declared first, Express matches 'my' and 'suggest-skills'
+// as an id param and calls getJobById('my') → crashes with 404/500.
 
-// Recruiter auth
-router.get ('/my/jobs',        protect, getMyJobs);
-router.post('/',               protect, createJob);
-router.put ('/:id',            protect, updateJob);
-router.delete('/:id',          protect, deleteJob);
+// Authenticated recruiter routes (specific strings first)
+router.get ('/my/jobs',        protect, getMyJobs);     // ✔ must be before /:id
+router.post('/suggest-skills', protect, suggestSkills); // ✔ must be before /:id
 
-// AI skill suggestions — used by job create/edit form
-router.post('/suggest-skills', protect, suggestSkills);
+// Public routes
+router.get('/',    getAllJobs);
+router.post('/',   protect, createJob);
+
+// Param routes (always last)
+router.get   ('/:id', getJobById);
+router.put   ('/:id', protect, updateJob);
+router.delete('/:id', protect, deleteJob);
 
 module.exports = router;
