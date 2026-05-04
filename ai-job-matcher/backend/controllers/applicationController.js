@@ -2,6 +2,7 @@ const Application = require('../models/Application');
 const Job         = require('../models/Job');
 const Profile     = require('../models/profile');
 const User        = require('../models/User');
+const mongoose    = require('mongoose');
 const { computeMatch } = require('../utils/matchUtils');
 const { notifyRecruiterNewApplication, notifySeekerStatusChange } = require('../services/emailService');
 
@@ -30,10 +31,10 @@ exports.applyToJob = async (req, res) => {
 
     const seekerUser = await User.findById(req.user._id).select('name email');
     notifyRecruiterNewApplication({
-      recruiterEmail: job.recruiter.email,
-      recruiterName:  job.recruiter.name,
-      seekerName:     seekerUser.name,
-      seekerEmail:    seekerUser.email,
+      recruiterEmail: job.recruiter?.email,
+      recruiterName:  job.recruiter?.name,
+      seekerName:     seekerUser?.name,
+      seekerEmail:    seekerUser?.email,
       jobTitle:       job.title,
       applicationId:  app._id,
     }).catch(err => console.error('[email] recruiter notify failed:', err.message));
@@ -86,13 +87,17 @@ exports.getApplicationsForJob = async (req, res) => {
       .lean();
 
     const enriched = await Promise.all(apps.map(async (app) => {
+      // Guard: seeker may not populate if user was deleted
+      if (!app.seeker?._id) {
+        return { ...app, applicant: { name: 'Deleted User', email: '' }, profile: {} };
+      }
       const profile = await Profile.findOne({ user: app.seeker._id })
         .select('headline skills avatarUrl location yearsOfExp techStack softSkills')
         .lean();
       return {
         ...app,
-        applicant: app.seeker,   // alias so frontend can use app.applicant
-        profile: profile || {},
+        applicant: app.seeker,
+        profile:   profile || {},
       };
     }));
 
@@ -112,7 +117,6 @@ exports.getAllApplicationsForRecruiter = async (req, res) => {
     if (req.user.role !== 'recruiter')
       return res.status(403).json({ message: 'Recruiters only' });
 
-    // Find all jobs owned by this recruiter first
     const myJobs = await Job.find({ recruiter: req.user._id }).select('_id').lean();
     const jobIds = myJobs.map(j => j._id);
 
@@ -122,8 +126,7 @@ exports.getAllApplicationsForRecruiter = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    // Alias seeker → applicant for frontend consistency
-    const normalized = apps.map(a => ({ ...a, applicant: a.seeker }));
+    const normalized = apps.map(a => ({ ...a, applicant: a.seeker || { name: 'Deleted User', email: '' } }));
     res.json(normalized);
   } catch (err) {
     console.error('getAllApplicationsForRecruiter error:', err);
@@ -138,39 +141,43 @@ exports.updateApplicationStatus = async (req, res) => {
       return res.status(403).json({ message: 'Recruiters only' });
 
     const { status, recruiterNote } = req.body;
-    // FIX: added 'hired' to allowed statuses
     const allowed = ['pending', 'reviewed', 'shortlisted', 'rejected', 'hired', 'withdrawn'];
     if (!allowed.includes(status))
       return res.status(400).json({ message: `Invalid status. Allowed: ${allowed.join(', ')}` });
 
-    const app = await Application.findById(req.params.appId)
+    // Use findOneAndUpdate to bypass Mongoose document-level enum cache issue
+    // (avoids the case where an old in-memory schema doesn't have 'hired' yet)
+    const app = await Application.findOneAndUpdate(
+      { _id: req.params.appId },
+      { $set: { status, ...(recruiterNote !== undefined ? { recruiterNote } : {}) } },
+      { returnDocument: 'after', runValidators: true }
+    )
       .populate('job',    'title company recruiter')
       .populate('seeker', 'name email');
 
     if (!app) return res.status(404).json({ message: 'Application not found' });
-    if (app.job.recruiter.toString() !== req.user._id.toString())
+    if (app.job?.recruiter?.toString() !== req.user._id.toString())
       return res.status(403).json({ message: 'Not authorized — not your job' });
 
-    app.status = status;
-    if (recruiterNote !== undefined) app.recruiterNote = recruiterNote;
-    await app.save();
-
-    const recruiterUser = await User.findById(req.user._id).select('name email');
-    notifySeekerStatusChange({
-      seekerEmail:    app.seeker.email,
-      seekerName:     app.seeker.name,
-      jobTitle:       app.job.title,
-      company:        app.job.company,
-      status,
-      recruiterNote:  app.recruiterNote,
-      recruiterEmail: status === 'shortlisted' ? recruiterUser.email : null,
-      recruiterName:  status === 'shortlisted' ? recruiterUser.name  : null,
-    }).catch(err => console.error('[email] seeker notify failed:', err.message));
+    // Email notification — fire and forget
+    if (app.seeker?.email) {
+      const recruiterUser = await User.findById(req.user._id).select('name email');
+      notifySeekerStatusChange({
+        seekerEmail:    app.seeker.email,
+        seekerName:     app.seeker.name,
+        jobTitle:       app.job?.title,
+        company:        app.job?.company,
+        status,
+        recruiterNote:  app.recruiterNote,
+        recruiterEmail: status === 'shortlisted' ? recruiterUser?.email : null,
+        recruiterName:  status === 'shortlisted' ? recruiterUser?.name  : null,
+      }).catch(err => console.error('[email] seeker notify failed:', err.message));
+    }
 
     res.json({ message: 'Status updated', status: app.status, application: app });
   } catch (err) {
     console.error('updateApplicationStatus error:', err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', detail: err.message });
   }
 };
 
