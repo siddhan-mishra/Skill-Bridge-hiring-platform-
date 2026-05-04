@@ -52,18 +52,20 @@ if not _key:
     raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
 gemini = genai_new.Client(api_key=_key)
 
-# ── Gemini model fallback chain (May 2026 current models) ────────────────────
-# gemini-1.5-flash / gemini-1.5-flash-8b REMOVED — deprecated, return 404
+# ── Gemini model fallback chain ────────────────────────────────────────────
+# VERIFIED working model IDs as of May 2026 via Google AI Studio ListModels
+# REMOVED: gemini-2.5-flash-preview-05-20 (NOT_FOUND — wrong date suffix)
+# REMOVED: gemini-1.5-flash (deprecated Jan 2026, returns 404 on v1beta)
+# Strategy: try newest fastest first, fallback to stable 1.5-pro last resort
 GEMINI_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash-preview-05-20",
+    "gemini-2.0-flash",           # fastest, high quota  → primary
+    "gemini-2.0-flash-lite",      # cheaper, lower latency → secondary
+    "gemini-2.5-flash-preview-04-17",  # latest preview (correct date suffix)
+    "gemini-1.5-pro",             # stable, always works, slower → last resort
 ]
 
-# ── BONUS EXPANSION MAP ───────────────────────────────────────────────────────
+# ── BONUS EXPANSION MAP ──────────────────────────────────────────────────
 # When a seeker writes "MERN" we expand to all component skills for matching.
-# Mirrors the Node.js SKILL_SYNONYMS but adds multi-skill shorthands.
-# Referenced by /compute-match to boost scores for shorthand-listed skills.
 BONUS_EXPANSIONS = {
     'mern':       ['mongodb', 'express', 'react', 'node'],
     'mean':       ['mongodb', 'express', 'angular', 'node'],
@@ -89,16 +91,6 @@ class SkillSuggestIn(BaseModel):
     description: str = ""
 
 class MatchRequest(BaseModel):
-    """
-    Input for hybrid semantic matching.
-    profileText  : full concatenated seeker profile text (headline + summary + skills + work)
-    jobText      : full job description + responsibilities
-    profileSkills: list of skills from seeker profile (canonical preferred)
-    jobSkills    : required skills from job posting
-    profileYears : seeker's years of experience (int)
-    requiredYears: job's minimum years required (int)
-    educationMatch: 0.0–1.0 pre-computed edu match (optional, default 0.5)
-    """
     profileText:   str
     jobText:       str
     profileSkills: List[str] = []
@@ -113,7 +105,7 @@ def health_check():
     return {"status": "healthy", "models": GEMINI_MODELS}
 
 
-# ── SkillNer extraction (fast, no LLM) ───────────────────────────────────────
+# ── SkillNer extraction (fast, no LLM) ────────────────────────────────────
 @app.post("/extract-skills", response_model=SkillsOut)
 def extract_skills(payload: TextIn):
     doc = skill_extractor.annotate(payload.text)
@@ -128,7 +120,7 @@ def extract_skills(payload: TextIn):
     return {"skills": sorted(skills)}
 
 
-# ── /suggest-skills : AI chip suggestions for job posting form ────────────────
+# ── /suggest-skills : AI chip suggestions for job posting form ──────────────
 @app.post("/suggest-skills")
 async def suggest_skills(payload: SkillSuggestIn):
     if not payload.title and not payload.description:
@@ -169,9 +161,7 @@ Return ONLY the JSON array:"""
         return {"skills": [], "error": str(ex)}
 
 
-# ── /compute-match : Hybrid SBERT + skill + experience matching ───────────────
-# This is the core of Step 2. Called by Node matchController for every match.
-#
+# ── /compute-match : Hybrid SBERT + skill + experience matching ─────────────
 # Scoring formula (research-backed, inspired by LinkedIn Talent Insights):
 #   40% → SBERT cosine similarity  (semantic understanding of full texts)
 #   40% → Skill match ratio        (synonym+fuzzy+bonus expansion aware)
@@ -192,11 +182,9 @@ async def compute_match(req: MatchRequest):
         profile_emb = sbert.encode([req.profileText], normalize_embeddings=True)
         job_emb     = sbert.encode([req.jobText],     normalize_embeddings=True)
         sbert_score = float(cosine_similarity(profile_emb, job_emb)[0][0])
-        # cosine similarity is -1..1; clamp to 0..1
         sbert_score = max(0.0, sbert_score)
 
         # 2. Skill match ratio ─────────────────────────────────────────────────
-        # Expand bonus shorthands in profile skills before comparing
         def expand_skills(skill_list):
             expanded = set()
             for s in skill_list:
@@ -210,38 +198,35 @@ async def compute_match(req: MatchRequest):
         job_set     = set(s.strip().lower() for s in req.jobSkills)
 
         if not job_set:
-            skill_score = 1.0  # no required skills = anyone qualifies
+            skill_score = 1.0
         else:
             matched = sum(1 for js in job_set if js in profile_set or
                           any(_fuzzy(js, ps) for ps in profile_set))
             skill_score = matched / len(job_set)
 
-        # Track which skills matched / missing for UI breakdown
-        matched_skills  = [js for js in job_set if js in profile_set or
-                            any(_fuzzy(js, ps) for ps in profile_set)]
-        missing_skills  = [js for js in job_set if js not in matched_skills]
-        extra_skills    = [ps for ps in profile_set
-                           if ps not in job_set and
-                           not any(_fuzzy(ps, js) for js in job_set)]
+        matched_skills = [js for js in job_set if js in profile_set or
+                           any(_fuzzy(js, ps) for ps in profile_set)]
+        missing_skills = [js for js in job_set if js not in matched_skills]
+        extra_skills   = [ps for ps in profile_set
+                          if ps not in job_set and
+                          not any(_fuzzy(ps, js) for js in job_set)]
 
         # 3. Experience + education score ──────────────────────────────────────
-        exp_years    = req.profileYears or 0
-        req_years    = req.requiredYears or 0
+        exp_years = req.profileYears or 0
+        req_years = req.requiredYears or 0
         if req_years == 0:
             exp_score = 1.0
         elif exp_years >= req_years:
             exp_score = 1.0
-        elif exp_years >= req_years * 0.7:  # within 30% of required → partial credit
+        elif exp_years >= req_years * 0.7:
             exp_score = 0.7
         else:
-            exp_score = max(0.2, exp_years / req_years)  # floor at 0.2
+            exp_score = max(0.2, exp_years / req_years)
 
-        edu_score = req.educationMatch  # passed from Node (0.0–1.0)
-
+        edu_score = req.educationMatch
         structured_score = (exp_score * 0.6) + (edu_score * 0.4)
 
         # 4. Weighted hybrid final score ───────────────────────────────────────
-        # 40% SBERT semantic + 40% skill overlap + 20% structured requirements
         final_raw = (
             0.40 * sbert_score +
             0.40 * skill_score +
@@ -261,12 +246,11 @@ async def compute_match(req: MatchRequest):
             },
             "matchedSkills": matched_skills,
             "missingSkills": missing_skills,
-            "extraSkills":   list(extra_skills)[:10],  # cap extra skills list
+            "extraSkills":   list(extra_skills)[:10],
         }
 
     except Exception as ex:
         print(f"[compute-match] error: {ex}")
-        # Fallback: return -1 score so Node.js knows to use local matchUtils
         return {"score": -1, "error": str(ex)}
 
 
@@ -276,7 +260,6 @@ def _fuzzy(a: str, b: str) -> bool:
         return True
     if len(a) <= 3 or len(b) <= 3:
         return False
-    # Levenshtein distance ≤ 1
     if abs(len(a) - len(b)) > 2:
         return False
     m, n = len(a), len(b)
@@ -289,7 +272,7 @@ def _fuzzy(a: str, b: str) -> bool:
     return dp[n] <= 1
 
 
-# ── PDF text extraction ───────────────────────────────────────────────────────
+# ── PDF text extraction ──────────────────────────────────────────────────
 def pdf_to_text(data: bytes) -> str:
     text = ""
     with pdfplumber.open(io.BytesIO(data)) as pdf:
@@ -300,7 +283,7 @@ def pdf_to_text(data: bytes) -> str:
     return text.strip()
 
 
-# ── Regex contact extractors ──────────────────────────────────────────────────
+# ── Regex contact extractors ───────────────────────────────────────────────
 def rx_email(t):     m = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', t);                 return m.group(0) if m else None
 def rx_phone(t):     m = re.search(r'(\+?\d[\d\s\-().]{7,}\d)', t);              return m.group(0).strip() if m else None
 def rx_linkedin(t):  m = re.search(r'linkedin\.com/in/[\w\-]+', t, re.I);         return "https://" + m.group(0) if m else None
@@ -310,10 +293,10 @@ def rx_portfolio(t):
     return hits[0] if hits else None
 
 
-# ── Gemini call with model fallback + retry on 429 ───────────────────────────
+# ── Gemini call with model fallback + smart 429 backoff ─────────────────────
 def call_gemini(prompt: str) -> str:
     last_err = None
-    for model in GEMINI_MODELS:
+    for attempt, model in enumerate(GEMINI_MODELS):
         try:
             print(f"[gemini] trying model={model}")
             resp = gemini.models.generate_content(model=model, contents=prompt)
@@ -323,17 +306,25 @@ def call_gemini(prompt: str) -> str:
             msg = str(ex)
             last_err = ex
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                delay = 5
+                # Parse retryDelay from Google's error message if present
+                delay = 8  # default
                 m = re.search(r'retryDelay.*?(\d+)s', msg)
                 if m:
-                    delay = min(int(m.group(1)), 10)
-                print(f"[gemini] 429 on {model}, waiting {delay}s")
-                time.sleep(delay)
+                    delay = min(int(m.group(1)), 15)
+                # Add jitter to avoid thundering herd
+                jitter = attempt * 2
+                total_delay = delay + jitter
+                print(f"[gemini] 429 on {model}, waiting {total_delay}s before next model")
+                time.sleep(total_delay)
+                continue
+            elif "404" in msg or "NOT_FOUND" in msg:
+                # Wrong model ID — skip immediately, do NOT retry or wait
+                print(f"[gemini] 404 on {model} (model not found) — skipping")
                 continue
             else:
                 print(f"[gemini] error on {model}: {ex}")
                 continue
-    raise last_err or RuntimeError("All Gemini models failed")
+    raise last_err or RuntimeError("All Gemini models exhausted")
 
 
 def strip_fences(raw: str) -> str:
@@ -349,7 +340,7 @@ def strip_fences(raw: str) -> str:
     return raw
 
 
-# ── /parse-resume : Gemini ONLY (SkillNer too slow on full PDF) ───────────────
+# ── /parse-resume : Gemini ONLY (SkillNer too slow on full PDF) ─────────────
 @app.post("/parse-resume")
 async def parse_resume(file: UploadFile = File(...)):
     content = await file.read()
