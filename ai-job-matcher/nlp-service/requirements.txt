@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+spacy
+skillNer
+pdfplumber
+google-genai
+# Step 2: Semantic matching
+sentence-transformers>=2.7.0
+scikit-learn>=1.4.0
+numpy>=1.26.0
