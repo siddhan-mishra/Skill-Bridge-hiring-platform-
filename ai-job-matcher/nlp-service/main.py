@@ -4,10 +4,12 @@ import io
 import time
 import spacy
 import json
+import numpy as np
 from spacy.matcher import PhraseMatcher
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
 from skillNer.skill_extractor_class import SkillExtractor
 import pdfplumber
 from google import genai as genai_new
@@ -20,6 +22,18 @@ try:
 except ImportError:
     from skillNer.utils import load_skill_db
     SKILL_DB = load_skill_db()
+
+# ── Sentence Transformers (lazy-loaded on first use to keep startup fast) ────
+_sbert_model = None
+
+def get_sbert():
+    global _sbert_model
+    if _sbert_model is None:
+        from sentence_transformers import SentenceTransformer
+        print("[sbert] loading all-MiniLM-L6-v2 ...")
+        _sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
+        print("[sbert] model loaded")
+    return _sbert_model
 
 app = FastAPI()
 app.add_middleware(
@@ -39,26 +53,59 @@ if not _key:
 gemini = genai_new.Client(api_key=_key)
 
 # ── Gemini model fallback chain (May 2026 current models) ────────────────────
-# gemini-2.0-flash        : primary — fast, free tier, 1M context
-# gemini-2.0-flash-lite   : lighter version, most generous RPM quota
-# gemini-2.5-flash-preview: most capable, use when others are exhausted
-# REMOVED: gemini-1.5-flash, gemini-1.5-flash-8b (deprecated, return 404)
+# gemini-1.5-flash / gemini-1.5-flash-8b REMOVED — deprecated, return 404
 GEMINI_MODELS = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-2.5-flash-preview-05-20",
 ]
 
+# ── BONUS EXPANSION MAP ───────────────────────────────────────────────────────
+# When a seeker writes "MERN" we expand to all component skills for matching.
+# Mirrors the Node.js SKILL_SYNONYMS but adds multi-skill shorthands.
+# Referenced by /compute-match to boost scores for shorthand-listed skills.
+BONUS_EXPANSIONS = {
+    'mern':       ['mongodb', 'express', 'react', 'node'],
+    'mean':       ['mongodb', 'express', 'angular', 'node'],
+    'mevn':       ['mongodb', 'express', 'vue', 'node'],
+    'lamp':       ['linux', 'apache', 'mysql', 'php'],
+    'fullstack':  ['html', 'css', 'javascript', 'react', 'node', 'mongodb'],
+    'full stack': ['html', 'css', 'javascript', 'react', 'node', 'mongodb'],
+    'devops':     ['docker', 'kubernetes', 'ci/cd', 'linux', 'git'],
+    'data science': ['python', 'pandas', 'numpy', 'machine learning', 'sql'],
+    'ml':         ['python', 'machine learning', 'scikit-learn', 'pandas', 'numpy'],
+    'ai/ml':      ['python', 'machine learning', 'deep learning', 'tensorflow', 'pytorch'],
+}
+
 
 class TextIn(BaseModel):
     text: str
 
 class SkillsOut(BaseModel):
-    skills: list[str]
+    skills: List[str]
 
 class SkillSuggestIn(BaseModel):
     title: str = ""
     description: str = ""
+
+class MatchRequest(BaseModel):
+    """
+    Input for hybrid semantic matching.
+    profileText  : full concatenated seeker profile text (headline + summary + skills + work)
+    jobText      : full job description + responsibilities
+    profileSkills: list of skills from seeker profile (canonical preferred)
+    jobSkills    : required skills from job posting
+    profileYears : seeker's years of experience (int)
+    requiredYears: job's minimum years required (int)
+    educationMatch: 0.0–1.0 pre-computed edu match (optional, default 0.5)
+    """
+    profileText:   str
+    jobText:       str
+    profileSkills: List[str] = []
+    jobSkills:     List[str] = []
+    profileYears:  Optional[int] = 0
+    requiredYears: Optional[int] = 0
+    educationMatch: Optional[float] = 0.5
 
 
 @app.get("/health")
@@ -79,6 +126,167 @@ def extract_skills(payload: TextIn):
                 if name:
                     skills.add(name.strip())
     return {"skills": sorted(skills)}
+
+
+# ── /suggest-skills : AI chip suggestions for job posting form ────────────────
+@app.post("/suggest-skills")
+async def suggest_skills(payload: SkillSuggestIn):
+    if not payload.title and not payload.description:
+        return {"skills": []}
+
+    PROMPT = f"""You are an expert technical recruiter with deep knowledge of the IT and software industry.
+
+Given the job title and description below, return a JSON array of the most relevant technical and soft skills
+required for this role. Follow these rules strictly:
+
+1. Return ONLY a raw JSON array of strings. No markdown, no explanation.
+2. Expand shorthand: "MERN" becomes ["MongoDB", "Express.js", "React", "Node.js"] as separate items.
+3. Include both hard skills (technologies, frameworks, languages) and soft skills.
+4. Normalize capitalization: "JavaScript" not "javascript", "Node.js" not "nodejs".
+5. Return 15-25 skills maximum, ordered by importance.
+6. Do not include generic terms like "Computer Science" or "Software Development".
+
+Job Title: {payload.title}
+Job Description: {payload.description[:3000]}
+
+Return ONLY the JSON array:"""
+
+    try:
+        raw = call_gemini(PROMPT)
+        raw = strip_fences(raw)
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            skills = parsed.get("skills", [])
+        elif isinstance(parsed, list):
+            skills = parsed
+        else:
+            skills = []
+        skills = [str(s).strip()[:50] for s in skills if s]
+        print(f"[suggest-skills] returned {len(skills)} skills")
+        return {"skills": skills}
+    except Exception as ex:
+        print(f"[suggest-skills] error: {ex}")
+        return {"skills": [], "error": str(ex)}
+
+
+# ── /compute-match : Hybrid SBERT + skill + experience matching ───────────────
+# This is the core of Step 2. Called by Node matchController for every match.
+#
+# Scoring formula (research-backed, inspired by LinkedIn Talent Insights):
+#   40% → SBERT cosine similarity  (semantic understanding of full texts)
+#   40% → Skill match ratio        (synonym+fuzzy+bonus expansion aware)
+#   20% → Experience + education   (structured requirement matching)
+#
+# References:
+#   - sentence-transformers all-MiniLM-L6-v2 (Hugging Face, 80MB, fast)
+#   - "Learning to Retrieve for Job Matching" arXiv 2402.13435
+#   - "SBERT-NLP Framework for Job Matching" JETIR2602011
+@app.post("/compute-match")
+async def compute_match(req: MatchRequest):
+    try:
+        sbert = get_sbert()
+
+        # 1. SBERT cosine similarity ──────────────────────────────────────────
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        profile_emb = sbert.encode([req.profileText], normalize_embeddings=True)
+        job_emb     = sbert.encode([req.jobText],     normalize_embeddings=True)
+        sbert_score = float(cosine_similarity(profile_emb, job_emb)[0][0])
+        # cosine similarity is -1..1; clamp to 0..1
+        sbert_score = max(0.0, sbert_score)
+
+        # 2. Skill match ratio ─────────────────────────────────────────────────
+        # Expand bonus shorthands in profile skills before comparing
+        def expand_skills(skill_list):
+            expanded = set()
+            for s in skill_list:
+                sl = s.strip().lower()
+                expanded.add(sl)
+                if sl in BONUS_EXPANSIONS:
+                    expanded.update(BONUS_EXPANSIONS[sl])
+            return expanded
+
+        profile_set = expand_skills(req.profileSkills)
+        job_set     = set(s.strip().lower() for s in req.jobSkills)
+
+        if not job_set:
+            skill_score = 1.0  # no required skills = anyone qualifies
+        else:
+            matched = sum(1 for js in job_set if js in profile_set or
+                          any(_fuzzy(js, ps) for ps in profile_set))
+            skill_score = matched / len(job_set)
+
+        # Track which skills matched / missing for UI breakdown
+        matched_skills  = [js for js in job_set if js in profile_set or
+                            any(_fuzzy(js, ps) for ps in profile_set)]
+        missing_skills  = [js for js in job_set if js not in matched_skills]
+        extra_skills    = [ps for ps in profile_set
+                           if ps not in job_set and
+                           not any(_fuzzy(ps, js) for js in job_set)]
+
+        # 3. Experience + education score ──────────────────────────────────────
+        exp_years    = req.profileYears or 0
+        req_years    = req.requiredYears or 0
+        if req_years == 0:
+            exp_score = 1.0
+        elif exp_years >= req_years:
+            exp_score = 1.0
+        elif exp_years >= req_years * 0.7:  # within 30% of required → partial credit
+            exp_score = 0.7
+        else:
+            exp_score = max(0.2, exp_years / req_years)  # floor at 0.2
+
+        edu_score = req.educationMatch  # passed from Node (0.0–1.0)
+
+        structured_score = (exp_score * 0.6) + (edu_score * 0.4)
+
+        # 4. Weighted hybrid final score ───────────────────────────────────────
+        # 40% SBERT semantic + 40% skill overlap + 20% structured requirements
+        final_raw = (
+            0.40 * sbert_score +
+            0.40 * skill_score +
+            0.20 * structured_score
+        )
+        final_pct = round(final_raw * 100)
+
+        print(f"[compute-match] sbert={sbert_score:.3f} skill={skill_score:.3f} "
+              f"struct={structured_score:.3f} → final={final_pct}%")
+
+        return {
+            "score": final_pct,
+            "breakdown": {
+                "semanticScore": round(sbert_score * 100),
+                "skillScore":    round(skill_score * 100),
+                "structScore":   round(structured_score * 100),
+            },
+            "matchedSkills": matched_skills,
+            "missingSkills": missing_skills,
+            "extraSkills":   list(extra_skills)[:10],  # cap extra skills list
+        }
+
+    except Exception as ex:
+        print(f"[compute-match] error: {ex}")
+        # Fallback: return -1 score so Node.js knows to use local matchUtils
+        return {"score": -1, "error": str(ex)}
+
+
+def _fuzzy(a: str, b: str) -> bool:
+    """Simple edit-distance fuzzy match for short canonical skill names."""
+    if a == b:
+        return True
+    if len(a) <= 3 or len(b) <= 3:
+        return False
+    # Levenshtein distance ≤ 1
+    if abs(len(a) - len(b)) > 2:
+        return False
+    m, n = len(a), len(b)
+    dp = list(range(n + 1))
+    for i in range(1, m + 1):
+        prev = dp[:]
+        dp[0] = i
+        for j in range(1, n + 1):
+            dp[j] = prev[j - 1] if a[i-1] == b[j-1] else 1 + min(prev[j], dp[j-1], prev[j-1])
+    return dp[n] <= 1
 
 
 # ── PDF text extraction ───────────────────────────────────────────────────────
@@ -102,7 +310,7 @@ def rx_portfolio(t):
     return hits[0] if hits else None
 
 
-# ── Gemini call with model fallback + retry on 429 ────────────────────────────
+# ── Gemini call with model fallback + retry on 429 ───────────────────────────
 def call_gemini(prompt: str) -> str:
     last_err = None
     for model in GEMINI_MODELS:
@@ -119,7 +327,7 @@ def call_gemini(prompt: str) -> str:
                 m = re.search(r'retryDelay.*?(\d+)s', msg)
                 if m:
                     delay = min(int(m.group(1)), 10)
-                print(f"[gemini] 429 on {model}, waiting {delay}s then trying next model")
+                print(f"[gemini] 429 on {model}, waiting {delay}s")
                 time.sleep(delay)
                 continue
             else:
@@ -139,57 +347,6 @@ def strip_fences(raw: str) -> str:
         if p.startswith("{") or p.startswith("["):
             return p
     return raw
-
-
-# ── /suggest-skills : AI skill chip suggestions for job posting form ──────────
-# Step 3 (job form) calls this; Step 2 (SBERT matching) will also enrich using
-# the expanded skill set returned here.
-@app.post("/suggest-skills")
-async def suggest_skills(payload: SkillSuggestIn):
-    """
-    Given a job title and/or description, return a list of relevant skills
-    the recruiter should add. Used for AI chip suggestions on the job form.
-    Also normalises MERN-style shorthand into component skills.
-    """
-    if not payload.title and not payload.description:
-        return {"skills": []}
-
-    PROMPT = f"""You are an expert technical recruiter with deep knowledge of the IT and software industry.
-
-Given the job title and description below, return a JSON array of the most relevant technical and soft skills
-required for this role. Follow these rules strictly:
-
-1. Return ONLY a raw JSON array of strings. No markdown, no explanation.
-2. Expand shorthand: "MERN" becomes ["MongoDB", "Express.js", "React", "Node.js"] as separate items.
-3. Include both hard skills (technologies, frameworks, languages) and soft skills (e.g. "Problem Solving").
-4. Normalize capitalization: "JavaScript" not "javascript", "Node.js" not "nodejs".
-5. Return 15-25 skills maximum, ordered by importance.
-6. Do not include generic terms like "Computer Science" or "Software Development".
-
-Job Title: {payload.title}
-Job Description: {payload.description[:3000]}
-
-Return ONLY the JSON array:"""
-
-    try:
-        raw = call_gemini(PROMPT)
-        raw = strip_fences(raw)
-        # Handle both array and object response
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            # Sometimes Gemini wraps in {"skills": [...]}
-            skills = parsed.get("skills", [])
-        elif isinstance(parsed, list):
-            skills = parsed
-        else:
-            skills = []
-        # Sanitize: strings only, max 50 chars each
-        skills = [str(s).strip()[:50] for s in skills if s]
-        print(f"[suggest-skills] title='{payload.title}' returned {len(skills)} skills")
-        return {"skills": skills}
-    except Exception as ex:
-        print(f"[suggest-skills] error: {ex}")
-        return {"skills": [], "error": str(ex)}
 
 
 # ── /parse-resume : Gemini ONLY (SkillNer too slow on full PDF) ───────────────
