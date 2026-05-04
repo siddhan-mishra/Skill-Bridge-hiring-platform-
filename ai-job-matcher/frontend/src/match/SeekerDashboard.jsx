@@ -1,6 +1,6 @@
-// SeekerDashboard.jsx — Step 5: Full Seeker Dashboard
+// SeekerDashboard.jsx — Full Seeker Dashboard
 // Profile completeness ring, application timeline sparkline,
-// KPI strip, recent applications, skill-gap nudge
+// KPI strip, recent applications, skill-gap nudge, AI resume download
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
@@ -8,8 +8,6 @@ import { useAuth } from '../auth/AuthContext';
 import ResumeButton from './ResumeButton';
 
 const scoreColor = (s) => s >= 75 ? '#34d399' : s >= 50 ? '#fbbf24' : s >= 25 ? '#f97316' : '#f87171';
-
-<ResumeButton style={{ marginTop: '1rem' }} />
 
 const STATUS_STYLE = {
   pending:     { color: '#fbbf24', bg: 'rgba(245,158,11,0.1)'   },
@@ -111,7 +109,9 @@ export default function SeekerDashboard() {
           <h2 style={{ color: '#e5e7eb', margin: 0 }}>🎯 Your Dashboard</h2>
           <p style={{ color: '#4b5563', fontSize: '0.83rem', margin: '0.2rem 0 0' }}>Track your job search progress</p>
         </div>
-        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+        {/* FIX: ResumeButton moved here inside the component return — was erroneously at module level */}
+        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <ResumeButton />
           <Link to="/matches"
             style={{ padding: '0.45rem 1.1rem', background: 'linear-gradient(135deg,#6366f1,#818cf8)', color: '#fff', borderRadius: 8, fontWeight: 700, fontSize: '0.85rem', textDecoration: 'none' }}>
             🔍 Find Matches
@@ -138,7 +138,6 @@ export default function SeekerDashboard() {
             <Link to="/profile/edit" style={{ display: 'inline-block', marginTop: '0.5rem', color: '#6366f1', fontSize: '0.82rem' }}>Complete your profile →</Link>
           )}
         </div>
-        {/* Score breakdown buckets */}
         {s.total > 0 && (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {Object.entries(s.scoreBuckets || {}).map(([range, count]) => (

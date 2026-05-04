@@ -12,7 +12,7 @@ const certificationSchema = new mongoose.Schema({
   name:   { type: String },
   issuer: { type: String },
   year:   { type: String },
-  link:   { type: String },   // ← added: certificate URL
+  link:   { type: String },
 }, { _id: false });
 
 const profileSchema = new mongoose.Schema({
@@ -39,6 +39,8 @@ const profileSchema = new mongoose.Schema({
   // ── Professional
   summary:        { type: String },
   skills:         [{ type: String }],
+  techStack:      [{ type: String }],   // FIX: was missing — used by matchController + resumeController
+  softSkills:     [{ type: String }],   // FIX: was missing — used by matchController + resumeController
   tools:          [{ type: String }],
   yearsOfExp:     { type: Number },
   currentTitle:   { type: String },
