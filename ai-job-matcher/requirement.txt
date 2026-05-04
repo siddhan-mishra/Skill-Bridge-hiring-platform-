@@ -8,4 +8,6 @@ pdfplumber python-multipart
 google-generativeai pdfplumber
 google-genai
 python-dotenv
-sentence-transformers scikit-learn torch
+sentence-transformers 
+scikit-learn 
+torch
