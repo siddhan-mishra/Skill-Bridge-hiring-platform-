@@ -13,10 +13,11 @@ exports.getMyProfile = async (req, res) => {
 
 exports.upsertMyProfile = async (req, res) => {
   try {
+    // FIX: use Mongoose option `new: true` instead of MongoDB driver `returnDocument: 'after'`
     const profile = await Profile.findOneAndUpdate(
       { user: req.user._id },
       { ...req.body, user: req.user._id },
-      { returnDocument: 'after', upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
     res.json(profile);
   } catch (err) {
@@ -30,7 +31,6 @@ exports.getProfileByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Guard: reject obviously bad IDs before hitting Mongoose
     if (!userId || userId === 'undefined' || !mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({ message: 'Invalid user ID' });
     }
