@@ -203,7 +203,7 @@ export default function RecruiterDashboard() {
                   </div>
                   <div style={{ display: 'flex', gap: '0.45rem', flexShrink: 0 }}>
                     <span style={{ fontSize: '0.72rem', color: '#60a5fa', fontWeight: 700 }}>{j.total} apps</span>
-                    {j.hired > 0 && <span style={{ fontSize: '0.72rem', color: '#a78bfa', fontWeight: 700' }}>🏆 {j.hired}</span>}
+                    {j.hired > 0 && <span style={{ fontSize: '0.72rem', color: '#a78bfa', fontWeight: 700 }}>🏆 {j.hired}</span>}
                   </div>
                 </div>
               ))}
