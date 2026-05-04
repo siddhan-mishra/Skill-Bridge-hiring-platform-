@@ -2,15 +2,16 @@ const express = require('express');
 const router  = express.Router();
 const { protect } = require('../middleware/authMiddleware');
 const {
-  getMatchesForCurrentSeeker,
-  getCandidatesForJob,
+  getMatchedJobs,
+  getJobMatchScore,
+  getRankedCandidates,
 } = require('../controllers/matchController');
 
-// Seeker: ranked jobs — support both legacy route and new alias
-router.get('/my-jobs', protect, getMatchesForCurrentSeeker);   // legacy
-router.get('/matches', protect, getMatchesForCurrentSeeker);   // new alias used by SeekerDashboard
+// Seeker
+router.get('/jobs',              protect, getMatchedJobs);             // seeker ranked feed
+router.get('/job/:jobId',        protect, getJobMatchScore);           // single job score
 
-// Recruiter: ranked candidates for a specific job
-router.get('/job/:jobId/candidates', protect, getCandidatesForJob);
+// Recruiter
+router.get('/candidates/:jobId', protect, getRankedCandidates);        // ranked candidates
 
 module.exports = router;

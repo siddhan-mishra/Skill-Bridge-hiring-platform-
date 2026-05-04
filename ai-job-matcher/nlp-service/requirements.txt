@@ -1,11 +1,12 @@
 fastapi
-uvicorn[standard]
-python-dotenv
+uvicorn
 spacy
-skillNer
+skillner
 pdfplumber
 google-genai
-# Step 2: Semantic matching
+python-dotenv
+numpy
+# Step 4 — AI matching engine (SBERT)
 sentence-transformers>=2.7.0
 scikit-learn>=1.4.0
-numpy>=1.26.0
+torch>=2.2.0
