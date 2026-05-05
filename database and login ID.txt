@@ -25,3 +25,6 @@ seekers
 
     sargamflutist@gmail.com
     password123
+
+    tisha@gmail.com
+    tisha_123
