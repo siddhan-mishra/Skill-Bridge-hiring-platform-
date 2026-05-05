@@ -1,0 +1,7 @@
+# Check .gitignore has these lines:
+frontend/.env
+backend/.env
+nlp-service/.env
+node_modules/
+venv/
+__pycache__/
