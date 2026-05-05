@@ -4,3 +4,27 @@ Recruiters
 
     recruiter@example.com
     password123
+
+    skill@example.com
+    password123
+
+    secretid2923@gmailcom
+    password123   - different hr consultant
+
+    secretid2923@gmail.com
+    password123  --- different hiring manager
+
+
+
+seekers
+    mayanku@example.com
+    password123
+
+    shipra@example.com
+    Shipra123@
+
+    sargamflutist@gmail.com
+    password123
+
+    tisha@gmail.com
+    tisha_123

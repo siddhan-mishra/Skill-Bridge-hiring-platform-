@@ -1,3 +1,5 @@
+then in cmd terminal in vs code: cd ai-job-matcher\nlp-service && venv\Scripts\activate
+
 to setup :
 
 1. pip install -r requirement.txt
@@ -5,17 +7,35 @@ to setup :
 
 if downloaded node then good
 then in cmd
-
+cd ai-job-matcher/backend
 npm install
 npm install mongodb
-cd ai-job-matcher/backend
+
 npm install multer cloudinary multer-storage-cloudinary
 
-then in cmd terminal in vs code: cd ai-job-matcher\nlp-service && venv\Scripts\activate
+---
 
 cd frontend && npm run dev
 
-cd backend && npm run dev
+cd backend && npm run dev or node server.js
 
 cd ai-job-matcher/nlp-service
 uvicorn main:app --reload --port 8000
+
+## ex requirement txt
+
+fastapi
+uvicorn[standard]
+spacy
+skillNer
+IPython
+pdfplumber
+python-multipart
+google-generativeai
+google-genai
+python-dotenv
+sentence-transformers
+scikit-learn
+torch
+python-docx
+groq

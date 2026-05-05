@@ -2,15 +2,16 @@ const express = require('express');
 const router  = express.Router();
 const { protect } = require('../middleware/authMiddleware');
 const {
-  getMatchesForCurrentSeeker,
-  getCandidatesForJob,
+  getMatchedJobs,
+  getJobMatchScore,
+  getRankedCandidates,
 } = require('../controllers/matchController');
 
-// seeker: ranked jobs
-router.get('/my-jobs', protect, getMatchesForCurrentSeeker);
+// Seeker
+router.get('/jobs',              protect, getMatchedJobs);             // seeker ranked feed
+router.get('/job/:jobId',        protect, getJobMatchScore);           // single job score
 
-// recruiter: ranked candidates for a specific job
-// Line 12: GET /api/match/job/:jobId/candidates
-router.get('/job/:jobId/candidates', protect, getCandidatesForJob);
+// Recruiter
+router.get('/candidates/:jobId', protect, getRankedCandidates);        // ranked candidates
 
 module.exports = router;

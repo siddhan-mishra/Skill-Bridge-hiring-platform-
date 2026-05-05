@@ -1,4 +1,5 @@
 const Profile = require('../models/profile');
+const mongoose = require('mongoose');
 
 exports.getMyProfile = async (req, res) => {
   try {
@@ -12,15 +13,37 @@ exports.getMyProfile = async (req, res) => {
 
 exports.upsertMyProfile = async (req, res) => {
   try {
-    const data = req.body;
+    // FIX: use Mongoose option `new: true` instead of MongoDB driver `returnDocument: 'after'`
     const profile = await Profile.findOneAndUpdate(
       { user: req.user._id },
-      { ...data, user: req.user._id },
-      { new: true, upsert: true }
+      { ...req.body, user: req.user._id },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
     res.json(profile);
   } catch (err) {
     console.error('upsertMyProfile error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// GET /api/profile/:userId — public profile (any logged-in user)
+exports.getProfileByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId || userId === 'undefined' || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: 'Invalid user ID' });
+    }
+
+    const profile = await Profile
+      .findOne({ user: userId })
+      .populate('user', 'name email role')
+      .lean();
+
+    if (!profile) return res.status(404).json({ message: 'Profile not found' });
+    res.json(profile);
+  } catch (err) {
+    console.error('getProfileByUserId error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -1,32 +1,41 @@
-const express = require('express');
-const cors = require('cors');
+const express  = require('express');
+const mongoose = require('mongoose');
+const cors     = require('cors');
+const path     = require('path');
 require('dotenv').config();
-const connectDB = require('./config/db');
 
 const app = express();
+
+// ── Middleware ──────────────────────────────────────────────────────────────────
+app.use(cors({ origin: '*', credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// ── DB ─────────────────────────────────────────────────────────────────────────────
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log('✅ MongoDB connected'))
+  .catch(err => { console.error('❌ MongoDB error:', err.message); process.exit(1); });
+
+// ── Routes ──────────────────────────────────────────────────────────────────────
+app.use('/api/auth',         require('./routes/authRoutes'));
+app.use('/api/profile',      require('./routes/profileRoutes'));
+app.use('/api/jobs',         require('./routes/jobRoutes'));
+app.use('/api/applications', require('./routes/applicationRoutes'));
+app.use('/api/matches',      require('./routes/matchRoutes'));
+app.use('/api/resume',       require('./routes/resumeRoutes'));    // Step 4: AI resume generation
+app.use('/api/upload',       require('./routes/uploadRoutes'));    // FIX: was missing — POST /avatar + POST /resume
+app.use('/api/stats',        require('./routes/statsRoutes'));     // FIX: was missing — GET /seeker + GET /recruiter
+app.use('/api/nlp',          require('./routes/nlpRoutes'));       // NLP skill-suggest
+
+// ── 404 handler ─────────────────────────────────────────────────────────────────
+app.use((req, res) => res.status(404).json({ message: `Route not found: ${req.method} ${req.path}` }));
+
+// ── Global error handler ────────────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  console.error('[global error]', err.message);
+  res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
+});
+
 const PORT = process.env.PORT || 5000;
-
-// connect to DB
-connectDB();
-
-// middleware
-app.use(cors());
-app.use(express.json());
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/profile', require('./routes/profileRoutes'));
-app.use('/api/jobs', require('./routes/jobRoutes'));
-app.use('/api/nlp', require('./routes/nlpRoutes'));
-app.use('/api/match', require('./routes/matchRoutes'));
-app.use('/api/upload', require('./routes/uploadRoutes'));
-
-
-
-
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'Backend is LIVE!', timestamp: new Date() });
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
