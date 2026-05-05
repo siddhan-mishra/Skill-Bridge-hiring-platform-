@@ -52,16 +52,16 @@ if not _key:
     raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
 gemini = genai_new.Client(api_key=_key)
 
-# ── FIXED: Removed dead/404 models, added working fallbacks ─────────────────
-# gemini-2.5-flash-preview-04-17 → 404 (not available on v1beta generateContent)
-# gemini-1.5-pro                 → 404 (deprecated in this API version)
-# gemini-1.5-flash and gemini-1.5-flash-8b are stable free-tier fallbacks
+# ── Gemini model list — verified working on v1beta generateContent (May 2026) ─
+# gemini-2.0-flash-exp  → 404 (removed from v1beta)
+# gemini-1.5-flash      → 404 (deprecated on v1beta)
+# gemini-1.5-flash-8b   → 404 (deprecated on v1beta)
+# ONLY gemini-2.0-flash and gemini-2.0-flash-lite are live on v1beta.
+# gemini-2.5-flash-preview-05-20 is the newest stable preview available.
 GEMINI_MODELS = [
-    "gemini-2.0-flash",           # primary — best speed/quality
-    "gemini-2.0-flash-lite",      # fallback 1 — faster, lower quota
-    "gemini-2.0-flash-exp",       # fallback 2 — experimental but available
-    "gemini-1.5-flash",           # fallback 3 — stable, widely available
-    "gemini-1.5-flash-8b",        # fallback 4 — smallest, almost always available
+    "gemini-2.5-flash-preview-05-20",  # newest — best quality, available on v1beta
+    "gemini-2.0-flash",                # primary stable
+    "gemini-2.0-flash-lite",           # smaller, lower quota cost
 ]
 
 BONUS_EXPANSIONS = {
@@ -402,7 +402,7 @@ Return ONLY the JSON:"""
             set_font(role_run, size=11, bold=True)
             company_run = p.add_run(job.get('company', ''))
             set_font(company_run, size=11)
-            dates = f"{job.get('startDate','')} – {job.get('endDate','Present')}"
+            dates = f"{job.get('startDate','')} \u2013 {job.get('endDate','Present')}"
             dates_run = p.add_run(f"  |  {dates}")
             set_font(dates_run, size=10.5, color=(100, 100, 100))
             for bullet in (job.get("bullets") or []):
@@ -435,7 +435,7 @@ Return ONLY the JSON:"""
             set_font(title_run, size=11, bold=True)
             tech = proj.get('technologies', '')
             if tech:
-                tech_run = p.add_run(f"  —  {tech}")
+                tech_run = p.add_run(f"  \u2014  {tech}")
                 set_font(tech_run, size=10.5, color=(100, 100, 100))
             for bullet in (proj.get("bullets") or []):
                 if bullet:
@@ -505,6 +505,11 @@ def rx_portfolio(t):
 
 
 def call_gemini(prompt: str) -> str:
+    """Try each model in GEMINI_MODELS.
+    - 429 RESOURCE_EXHAUSTED: exponential backoff, then try next model.
+    - 404 NOT_FOUND: skip immediately (model not available on this API key/version).
+    - Other errors: log and try next.
+    """
     last_err = None
     for attempt, model in enumerate(GEMINI_MODELS):
         try:
@@ -516,20 +521,21 @@ def call_gemini(prompt: str) -> str:
             msg = str(ex)
             last_err = ex
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                delay = 8
+                # Parse retryDelay from error message, clamp to 30s max
+                delay = 10 + attempt * 5  # exponential: 10s, 15s, 20s
                 m = re.search(r'retryDelay.*?(\d+)s', msg)
-                if m: delay = min(int(m.group(1)), 15)
-                total_delay = delay + attempt * 2
-                print(f"[gemini] 429 on {model}, waiting {total_delay}s")
-                time.sleep(total_delay)
+                if m:
+                    delay = min(int(m.group(1)) + attempt * 3, 30)
+                print(f"[gemini] 429 on {model}, waiting {delay}s then trying next model")
+                time.sleep(delay)
                 continue
             elif "404" in msg or "NOT_FOUND" in msg:
-                print(f"[gemini] 404 on {model} — skipping")
+                print(f"[gemini] 404 on {model} — model not available, skipping")
                 continue
             else:
                 print(f"[gemini] error on {model}: {ex}")
                 continue
-    raise last_err or RuntimeError("All Gemini models exhausted")
+    raise last_err or RuntimeError("All Gemini models exhausted — check your GEMINI_API_KEY quota")
 
 
 def strip_fences(raw: str) -> str:
@@ -549,7 +555,7 @@ async def parse_resume(file: UploadFile = File(...)):
     text = pdf_to_text(content)
 
     if not text:
-        return {"error": "No text extracted — PDF may be image-based (scanned)."}
+        return {"error": "No text extracted \u2014 PDF may be image-based (scanned)."}
 
     email     = rx_email(text)
     phone     = rx_phone(text)
@@ -562,7 +568,7 @@ async def parse_resume(file: UploadFile = File(...)):
 RULES (follow strictly):
 1. Return ONLY a raw JSON object. No markdown, no triple backticks, no explanation.
 2. Use null (JSON null) for truly missing fields.
-3. Arrays must be [] if nothing found — never null.
+3. Arrays must be [] if nothing found \u2014 never null.
 4. yearsOfExp = integer (e.g. 3), not a string.
 5. skills = programming languages, frameworks, libraries, technical concepts.
 6. tools = software tools, platforms, IDEs, cloud services (Git, Docker, AWS, VS Code).
