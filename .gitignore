@@ -1,0 +1,5 @@
+# Clear everything out of any subfolder named .env
+**/.env
+node_modules/
+venv/
+__pycache__/
