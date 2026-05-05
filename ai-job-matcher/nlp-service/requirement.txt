@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.1
@@ -138,3 +139,19 @@ weasel==0.4.3
 websockets==16.0
 wrapt==2.1.2
 xlrd==2.0.1
+=======
+fastapi
+uvicorn[standard]
+spacy
+skillNer
+IPython
+pdfplumber
+python-multipart
+google-generativeai
+google-genai
+python-dotenv
+sentence-transformers 
+scikit-learn 
+torch
+python-docx
+>>>>>>> cf4e8251cf897d35f8b4976d2152103b1f426566
