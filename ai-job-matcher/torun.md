@@ -7,10 +7,10 @@ to setup :
 
 if downloaded node then good
 then in cmd
-
+cd ai-job-matcher/backend
 npm install
 npm install mongodb
-cd ai-job-matcher/backend
+
 npm install multer cloudinary multer-storage-cloudinary
 
 ---
