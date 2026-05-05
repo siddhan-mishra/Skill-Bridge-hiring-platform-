@@ -6,29 +6,32 @@ require('dotenv').config();
 
 const app = express();
 
-// ── Middleware ──────────────────────────────────────────────────────────
+// ── Middleware ──────────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ── DB ────────────────────────────────────────────────────────────────
+// ── DB ─────────────────────────────────────────────────────────────────────────────
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log('✅ MongoDB connected'))
   .catch(err => { console.error('❌ MongoDB error:', err.message); process.exit(1); });
 
-// ── Routes ──────────────────────────────────────────────────────────
+// ── Routes ──────────────────────────────────────────────────────────────────────
 app.use('/api/auth',         require('./routes/authRoutes'));
 app.use('/api/profile',      require('./routes/profileRoutes'));
 app.use('/api/jobs',         require('./routes/jobRoutes'));
 app.use('/api/applications', require('./routes/applicationRoutes'));
 app.use('/api/matches',      require('./routes/matchRoutes'));
-app.use('/api/resume',       require('./routes/resumeRoutes'));   // ← Step 4
+app.use('/api/resume',       require('./routes/resumeRoutes'));    // Step 4: AI resume generation
+app.use('/api/upload',       require('./routes/uploadRoutes'));    // FIX: was missing — POST /avatar + POST /resume
+app.use('/api/stats',        require('./routes/statsRoutes'));     // FIX: was missing — GET /seeker + GET /recruiter
+app.use('/api/nlp',          require('./routes/nlpRoutes'));       // NLP skill-suggest
 
-// ── 404 handler ──────────────────────────────────────────────────────
+// ── 404 handler ─────────────────────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ message: `Route not found: ${req.method} ${req.path}` }));
 
-// ── Global error handler ───────────────────────────────────────────────
+// ── Global error handler ────────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('[global error]', err.message);
   res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
