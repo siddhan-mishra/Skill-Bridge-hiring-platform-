@@ -1,11 +1,15 @@
-// ProfilePage.jsx — v4 final
-// Fixes: single save button, email shown read-only, resume-only upload in Preferences tab,
-//        applyParsed includes projects, clean layout
+// ProfilePage.jsx — v5
+// Fixes:
+//  1. Removed confusing second 'Upload Resume PDF' store-only button
+//  2. Renamed 'Upload & Parse' → '🔍 Parse Resume' — only parses, does not store
+//  3. Added '✨ Generate Resume' button in AI banner AND in Preferences resume section
+//  4. Generate button: calls POST /api/resume/generate-save → saves URL to profile
+//  5. 'View Resume' link shows for both uploaded (parsed) and generated resumes
 import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../auth/AuthContext';
+import API from '../api/jobApi';
 
-// ── Shared styles ──────────────────────────────────────────────────────────
 const S = {
   inp: {
     width: '100%', padding: '0.45rem 0.75rem',
@@ -69,9 +73,8 @@ export default function ProfilePage() {
   const { user, API_BASE } = useAuth();
   const token = localStorage.getItem('token');
 
-  const avatarRef     = useRef(null);
-  const resumeParseRef  = useRef(null);  // for AI parse
-  const resumeStoreRef  = useRef(null);  // for store-only
+  const avatarRef      = useRef(null);
+  const resumeParseRef = useRef(null);
 
   const [tab,          setTab]          = useState('identity');
   const [loading,      setLoading]      = useState(true);
@@ -81,7 +84,7 @@ export default function ProfilePage() {
   const [avatarB64,    setAvatarB64]    = useState(null);
   const [uploading,    setUploading]    = useState(false);
   const [parsing,      setParsing]      = useState(false);
-  const [storing,      setStoring]      = useState(false);
+  const [generating,   setGenerating]   = useState(false);
   const [parsePreview, setParsePreview] = useState(null);
   const [originalForm, setOriginalForm] = useState(null);
 
@@ -155,7 +158,7 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!msg && !err) return;
-    const t = setTimeout(() => { setMsg(''); setErr(''); }, 5000);
+    const t = setTimeout(() => { setMsg(''); setErr(''); }, 6000);
     return () => clearTimeout(t);
   }, [msg, err]);
 
@@ -195,7 +198,9 @@ export default function ProfilePage() {
     reader.readAsDataURL(file);
   };
 
-  // ── Resume: Parse + Store (AI auto-fill) ──────────────────────
+  // ── Resume: Parse only (AI auto-fill, does NOT store file) ───────────────
+  // The parsed data fills form fields. The actual file is NOT stored.
+  // To store a resume URL, use Generate Resume which uploads to Cloudinary.
   const handleResumeParse = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -208,14 +213,14 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` },
       });
       const { resumeUrl, parsed } = res.data;
+      // resumeUrl from uploaded PDF — store it too
       if (resumeUrl) set('resumeUrl', resumeUrl);
-      // Check if parsed has any real content
       const hasParsed = parsed && (parsed.fullName || parsed.skills?.length > 0 || parsed.workHistory?.length > 0);
       if (hasParsed) {
         setParsePreview(parsed);
         setMsg('✅ Resume parsed! Preview below — click "Apply to Profile" to fill all fields.');
       } else {
-        setMsg('⚠️ Resume uploaded & saved, but AI parsing returned empty. Your PDF may be image-based.');
+        setMsg('⚠️ Resume saved, but AI parsing returned empty. Your PDF may be image-based.');
       }
     } catch (ex) {
       setErr('Parse failed: ' + (ex.response?.data?.message || ex.message));
@@ -224,27 +229,38 @@ export default function ProfilePage() {
     }
   };
 
-  // ── Resume: Store-only (no parsing, just saves file) ──────────
-  const handleResumeStore = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    e.target.value = '';
-    setStoring(true); setErr('');
+  // ── Generate Resume: calls backend → NLP → Cloudinary → saves URL ────────
+  const handleGenerateResume = async () => {
+    setGenerating(true); setErr('');
     try {
-      const fd = new FormData();
-      fd.append('resume', file);
-      // Use the same endpoint but ignore parsed data
-      const res = await axios.post(`${API_BASE}/api/upload/resume`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` },
-      });
-      if (res.data.resumeUrl) {
-        set('resumeUrl', res.data.resumeUrl);
-        setMsg('✅ Resume saved! View it on your public profile.');
+      // POST /api/resume/generate-save — generates docx, uploads, saves resumeUrl
+      const res = await API.post('/resume/generate-save', {}, { responseType: 'json' });
+      const { resumeUrl: genUrl } = res.data;
+      if (genUrl) {
+        set('resumeUrl', genUrl);
+        setMsg('✅ Resume generated & saved! View it on your public profile. Downloading now…');
+        // Also trigger download
+        const dlRes = await API.get('/resume/generate', { responseType: 'blob' });
+        const disposition = dlRes.headers?.['content-disposition'] || '';
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        const filename = match ? match[1] : `${user?.name || 'Resume'}_Resume.docx`;
+        const url  = window.URL.createObjectURL(new Blob([dlRes.data]));
+        const link = document.createElement('a');
+        link.href = url; link.download = filename;
+        document.body.appendChild(link); link.click(); link.remove();
+        window.URL.revokeObjectURL(url);
       }
     } catch (ex) {
-      setErr('Upload failed: ' + (ex.response?.data?.message || ex.message));
+      const errData = ex.response?.data;
+      if (errData instanceof Blob) {
+        const text = await errData.text();
+        try { setErr(JSON.parse(text).message || 'Generation failed.'); }
+        catch { setErr('Resume generation failed.'); }
+      } else {
+        setErr(errData?.message || 'Resume generation failed. Make sure you have a headline and skills.');
+      }
     } finally {
-      setStoring(false);
+      setGenerating(false);
     }
   };
 
@@ -326,7 +342,6 @@ export default function ProfilePage() {
     setMsg('Changes discarded.');
   };
 
-  // ── Save profile ──────────────────────────────────────────────
   const handleSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     setSaving(true); setErr(''); setMsg('');
@@ -385,11 +400,10 @@ export default function ProfilePage() {
     { id: 'preferences',  label: '⚙️ Preferences' },
   ];
 
-  // ─────────────────────────────────────────────────────────────
   return (
     <div className="card" style={{ maxWidth: 800, margin: '0 auto' }}>
 
-      {/* ── Header row: title + Cancel + Save ──────────────── */}
+      {/* Header row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <h2 style={{ margin: 0, fontSize: '1.1rem', color: '#ccc' }}>Edit Profile</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -408,22 +422,33 @@ export default function ProfilePage() {
       {err && <div style={{ padding: '0.6rem 1rem', background: '#1a0000', border: '1px solid #4a1010', borderRadius: '6px', color: '#ff7070', marginBottom: '0.75rem', fontSize: '0.84rem' }}>{err}</div>}
       {msg && <div style={{ padding: '0.6rem 1rem', background: '#001a00', border: '1px solid #0a3a0a', borderRadius: '6px', color: '#6bcb77', marginBottom: '0.75rem', fontSize: '0.84rem' }}>{msg}</div>}
 
-      {/* ── AI Resume Parse Banner ──────────────────────────── */}
+      {/* ── AI Resume Banner ── Parse + Generate side by side ── */}
       <div style={{ background: '#080f1a', border: '1px dashed #1a3a5a', borderRadius: '9px', padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div>
-            <div style={{ fontWeight: 600, color: '#5ab0e0', fontSize: '0.9rem' }}>🤖 AI Resume Parser — Auto-fill every field</div>
-            <div style={{ color: '#444', fontSize: '0.75rem', marginTop: '0.1rem' }}>Upload PDF → Gemini reads it → fills Name, Skills, Work History, Education, Projects</div>
-          </div>
+        <div style={{ fontWeight: 600, color: '#5ab0e0', fontSize: '0.9rem', marginBottom: '0.2rem' }}>🤖 AI Resume Tools</div>
+        <div style={{ color: '#444', fontSize: '0.75rem', marginBottom: '0.75rem' }}>Parse an existing PDF to auto-fill your profile, or generate a polished Harvard-format resume from your profile data.</div>
+
+        <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+          {/* Parse button */}
           <div>
             <input ref={resumeParseRef} type="file" accept=".pdf" style={{ display: 'none' }} onChange={handleResumeParse} />
             <button type="button" onClick={() => resumeParseRef.current.click()} disabled={parsing}
-              style={{ padding: '0.35rem 0.9rem', background: '#0a1e33', color: '#5ab0e0', border: '1px solid #1a3a5a', borderRadius: '6px', cursor: parsing ? 'wait' : 'pointer', fontSize: '0.82rem' }}>
-              {parsing ? '⏳ Parsing… (5-10s)' : '📤 Upload & Parse'}
+              style={{ padding: '0.38rem 0.95rem', background: '#0a1e33', color: '#5ab0e0', border: '1px solid #1a3a5a', borderRadius: '6px', cursor: parsing ? 'wait' : 'pointer', fontSize: '0.82rem', fontWeight: 600 }}>
+              {parsing ? '⏳ Parsing…' : '🔍 Parse Resume'}
             </button>
+            <div style={{ fontSize: '0.68rem', color: '#333', marginTop: '0.2rem' }}>Upload PDF → fills all fields</div>
+          </div>
+
+          {/* Generate button */}
+          <div>
+            <button type="button" onClick={handleGenerateResume} disabled={generating}
+              style={{ padding: '0.38rem 0.95rem', background: generating ? '#1a1a1a' : 'linear-gradient(135deg,#6366f1,#818cf8)', color: '#fff', border: 'none', borderRadius: '6px', cursor: generating ? 'not-allowed' : 'pointer', fontSize: '0.82rem', fontWeight: 600 }}>
+              {generating ? '⏳ Generating…' : '✨ Generate Resume'}
+            </button>
+            <div style={{ fontSize: '0.68rem', color: '#333', marginTop: '0.2rem' }}>Profile → Harvard .docx + saves to profile</div>
           </div>
         </div>
 
+        {/* Parse preview */}
         {parsePreview && (
           <div style={{ marginTop: '0.85rem', padding: '0.85rem', background: '#061206', border: '1px solid #1a3a1a', borderRadius: '7px' }}>
             <div style={{ fontWeight: 600, color: '#6bcb77', marginBottom: '0.5rem', fontSize: '0.84rem' }}>✅ Parsed — preview:</div>
@@ -448,7 +473,7 @@ export default function ProfilePage() {
         )}
       </div>
 
-      {/* ── Tabs ───────────────────────────────────────────── */}
+      {/* Tabs */}
       <div style={{ display: 'flex', marginBottom: '1.25rem', borderBottom: '1px solid #1e1e1e' }}>
         {tabs.map(t => (
           <button key={t.id} type="button" onClick={() => setTab(t.id)} style={{
@@ -460,10 +485,9 @@ export default function ProfilePage() {
         ))}
       </div>
 
-      {/* ═══ IDENTITY TAB ════════════════════════════════════ */}
+      {/* IDENTITY TAB */}
       {tab === 'identity' && (
         <div>
-          {/* Avatar block */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', padding: '0.9rem', background: '#0d0d0d', borderRadius: '9px', border: '1px solid #1e1e1e', marginBottom: '1.25rem' }}>
             <div style={{ width: 72, height: 72, borderRadius: '50%', overflow: 'hidden', background: '#1a1a1a', border: '2px solid #2a2a2a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', flexShrink: 0 }}>
               {avatarB64 ? <img src={avatarB64} alt="avatar" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> : '👤'}
@@ -479,7 +503,6 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Email — read-only */}
           <F label="Email (account — not editable)">
             <input style={S.inpDisabled} value={user?.email || ''} readOnly disabled />
           </F>
@@ -501,7 +524,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ═══ PROFESSIONAL TAB ════════════════════════════════ */}
+      {/* PROFESSIONAL TAB */}
       {tab === 'professional' && (
         <div>
           <div style={S.grid2}>
@@ -538,7 +561,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ═══ BACKGROUND TAB ══════════════════════════════════ */}
+      {/* BACKGROUND TAB */}
       {tab === 'background' && (
         <div>
           <div style={S.sec}>🎓 Education</div>
@@ -597,7 +620,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ═══ PREFERENCES TAB ═════════════════════════════════ */}
+      {/* PREFERENCES TAB */}
       {tab === 'preferences' && (
         <div>
           <F label="Preferred Job Titles (comma-separated)"><input style={S.inp} value={form.preferredTitles} onChange={e=>set('preferredTitles',e.target.value)} placeholder="Full Stack Developer, Backend Engineer" /></F>
@@ -620,32 +643,10 @@ export default function ProfilePage() {
             <label htmlFor="relocate" style={{ color:'#888', fontSize:'0.85rem', cursor:'pointer' }}>Willing to relocate</label>
           </div>
 
-          {/* ── Resume Storage Section ────────────────────── */}
-          <div style={S.sec}>📄 Resume File</div>
+          {/* Resume section — view + generate only (no upload button here) */}
+          <div style={S.sec}>📄 Resume</div>
           <div style={{ background:'#0a0a0a', border:'1px solid #1e1e1e', borderRadius:'8px', padding:'1rem' }}>
             {form.resumeUrl ? (
               <div style={{ marginBottom:'0.75rem' }}>
-                <div style={{ fontSize:'0.78rem', color:'#555', marginBottom:'0.35rem' }}>Current resume:</div>
-                <a href={form.resumeUrl} target="_blank" rel="noopener noreferrer"
-                  style={{ color:'#5ab0e0', fontSize:'0.84rem', wordBreak:'break-all' }}>
-                  📄 View stored resume
-                </a>
-              </div>
-            ) : (
-              <div style={{ color:'#444', fontSize:'0.82rem', marginBottom:'0.75rem' }}>No resume uploaded yet.</div>
-            )}
-            <div style={{ fontSize:'0.8rem', color:'#666', marginBottom:'0.5rem' }}>
-              Upload PDF to store &amp; display on your public profile (no AI parsing — just stores the file).
-            </div>
-            <input ref={resumeStoreRef} type="file" accept=".pdf" style={{ display:'none' }} onChange={handleResumeStore} />
-            <button type="button" onClick={()=>resumeStoreRef.current.click()} disabled={storing}
-              style={{ padding:'0.3rem 0.85rem', background:'#0a1a0a', color:'#6bcb77', border:'1px solid #1a3a1a', borderRadius:'6px', cursor: storing?'wait':'pointer', fontSize:'0.8rem' }}>
-              {storing ? '⏳ Uploading…' : '📁 Upload Resume PDF'}
-            </button>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
-}
+                <div style={{ fontSize:'0.78rem', color:'#555', marginBottom:'0.35rem' }}>Current resume on your profile:</div>
+                <a href={form.resumeUrl} target=

@@ -24,7 +24,6 @@ except ImportError:
     from skillNer.utils import load_skill_db
     SKILL_DB = load_skill_db()
 
-# ── Sentence Transformers (lazy-loaded on first use) ────────────────────────
 _sbert_model = None
 
 def get_sbert():
@@ -53,11 +52,16 @@ if not _key:
     raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
 gemini = genai_new.Client(api_key=_key)
 
+# ── FIXED: Removed dead/404 models, added working fallbacks ─────────────────
+# gemini-2.5-flash-preview-04-17 → 404 (not available on v1beta generateContent)
+# gemini-1.5-pro                 → 404 (deprecated in this API version)
+# gemini-1.5-flash and gemini-1.5-flash-8b are stable free-tier fallbacks
 GEMINI_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash-preview-04-17",
-    "gemini-1.5-pro",
+    "gemini-2.0-flash",           # primary — best speed/quality
+    "gemini-2.0-flash-lite",      # fallback 1 — faster, lower quota
+    "gemini-2.0-flash-exp",       # fallback 2 — experimental but available
+    "gemini-1.5-flash",           # fallback 3 — stable, widely available
+    "gemini-1.5-flash-8b",        # fallback 4 — smallest, almost always available
 ]
 
 BONUS_EXPANSIONS = {
@@ -239,17 +243,8 @@ async def compute_match(req: MatchRequest):
         return {"score": -1, "error": str(ex)}
 
 
-# ── /generate-resume — Harvard-format .docx generation ───────────────────
-# Flow:
-#   1. Build a detailed prompt with profile JSON → Gemini returns polished
-#      Harvard-style bullet content (tightened, action-verb led)
-#   2. python-docx renders the layout: name header, horizontal rule, sections
-#   3. Returns .docx as a streaming binary response (nothing stored on disk)
-#
-# Harvard format reference: careerservices.fas.harvard.edu/resources/create-a-resume
 @app.post("/generate-resume")
 async def generate_resume(req: ResumeRequest):
-    # ── Step 1: Ask Gemini to polish & format the content ─────────────────
     profile_json = req.model_dump()
     PROMPT = f"""You are a Harvard Career Services resume writer. Given the raw profile data below,
 write polished resume content following Harvard format rules:
@@ -300,7 +295,6 @@ Return ONLY the JSON:"""
         print(f"[generate-resume] Gemini OK for {req.name}")
     except Exception as ex:
         print(f"[generate-resume] Gemini error, using raw profile data: {ex}")
-        # Graceful fallback: use raw profile data as-is
         ai_content = {
             "summary": req.summary or "",
             "skills_line": ", ".join((req.skills or [])[:12]),
@@ -317,17 +311,14 @@ Return ONLY the JSON:"""
             ],
         }
 
-    # ── Step 2: Build .docx with python-docx ─────────────────────────────
     from docx import Document
     from docx.shared import Pt, RGBColor, Inches
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
-    import copy
 
     doc = Document()
 
-    # Page margins: 1 inch all sides (Harvard standard)
     for section in doc.sections:
         section.top_margin    = Inches(1)
         section.bottom_margin = Inches(1)
@@ -342,7 +333,6 @@ Return ONLY the JSON:"""
             run.font.color.rgb = RGBColor(*color)
 
     def add_hrule(doc):
-        """Add a full-width horizontal line (Harvard-style section divider)."""
         p  = doc.add_paragraph()
         pr = p._p.get_or_add_pPr()
         pb = OxmlElement('w:pBdr')
@@ -370,14 +360,12 @@ Return ONLY the JSON:"""
         run = p.add_run(text)
         set_font(run, size=10.5)
 
-    # ── NAME (centered, 16pt bold) ──────────────────────────────────────
     name_p = doc.add_paragraph()
     name_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     name_p.paragraph_format.space_after = Pt(2)
     name_run = name_p.add_run(req.name or "")
     set_font(name_run, size=16, bold=True)
 
-    # ── CONTACT LINE (centered, 10pt) ──────────────────────────────
     contact_parts = [p for p in [
         req.phone, req.email, req.location,
         req.linkedinUrl, req.githubUrl, req.portfolioUrl
@@ -388,7 +376,6 @@ Return ONLY the JSON:"""
     contact_run = contact_p.add_run("  |  ".join(contact_parts))
     set_font(contact_run, size=10)
 
-    # ── SUMMARY ────────────────────────────────────────────────────
     summary_text = ai_content.get("summary") or req.summary or ""
     if summary_text:
         add_section_heading(doc, "Summary")
@@ -397,7 +384,6 @@ Return ONLY the JSON:"""
         run = p.add_run(summary_text)
         set_font(run, size=10.5)
 
-    # ── SKILLS ─────────────────────────────────────────────────────
     skills_line = ai_content.get("skills_line") or ", ".join((req.skills or [])[:12])
     if skills_line:
         add_section_heading(doc, "Technical Skills")
@@ -406,12 +392,10 @@ Return ONLY the JSON:"""
         run = p.add_run(skills_line)
         set_font(run, size=10.5)
 
-    # ── EXPERIENCE ──────────────────────────────────────────────
     ai_work = ai_content.get("workHistory") or []
     if ai_work:
         add_section_heading(doc, "Experience")
         for job in ai_work:
-            # Role + Company on one line, dates right-aligned
             p = doc.add_paragraph()
             p.paragraph_format.space_after = Pt(1)
             role_run = p.add_run(f"{job.get('role','')}, ")
@@ -425,7 +409,6 @@ Return ONLY the JSON:"""
                 if bullet:
                     add_bullet(doc, bullet)
 
-    # ── EDUCATION ───────────────────────────────────────────────
     if req.education:
         add_section_heading(doc, "Education")
         for edu in req.education:
@@ -442,7 +425,6 @@ Return ONLY the JSON:"""
                 meta_run = p.add_run(f"  |  {meta}")
                 set_font(meta_run, size=10.5, color=(100, 100, 100))
 
-    # ── PROJECTS ────────────────────────────────────────────────
     ai_projects = ai_content.get("projects") or []
     if ai_projects:
         add_section_heading(doc, "Projects")
@@ -459,7 +441,6 @@ Return ONLY the JSON:"""
                 if bullet:
                     add_bullet(doc, bullet)
 
-    # ── CERTIFICATIONS ─────────────────────────────────────────
     if req.certifications:
         add_section_heading(doc, "Certifications")
         for cert in req.certifications:
@@ -470,14 +451,12 @@ Return ONLY the JSON:"""
             if line:
                 add_bullet(doc, line)
 
-    # ── LANGUAGES ─────────────────────────────────────────────
     if req.languages:
         add_section_heading(doc, "Languages")
         p = doc.add_paragraph()
         run = p.add_run(", ".join(req.languages))
         set_font(run, size=10.5)
 
-    # ── Stream .docx as binary response (no disk I/O) ─────────────────
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
