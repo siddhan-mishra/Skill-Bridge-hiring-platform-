@@ -47,21 +47,36 @@ app.add_middleware(
 nlp = spacy.load("en_core_web_sm")
 skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
 
-_key = os.environ.get("GEMINI_API_KEY")
-if not _key:
+# ── Gemini client ────────────────────────────────────────────────────
+_gemini_key = os.environ.get("GEMINI_API_KEY")
+if not _gemini_key:
     raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
-gemini = genai_new.Client(api_key=_key)
+gemini = genai_new.Client(api_key=_gemini_key)
 
-# ── Gemini model list — verified working on v1beta generateContent (May 2026) ─
-# gemini-2.0-flash-exp  → 404 (removed from v1beta)
-# gemini-1.5-flash      → 404 (deprecated on v1beta)
-# gemini-1.5-flash-8b   → 404 (deprecated on v1beta)
-# ONLY gemini-2.0-flash and gemini-2.0-flash-lite are live on v1beta.
-# gemini-2.5-flash-preview-05-20 is the newest stable preview available.
 GEMINI_MODELS = [
-    "gemini-2.5-flash-preview-05-20",  # newest — best quality, available on v1beta
-    "gemini-2.0-flash",                # primary stable
-    "gemini-2.0-flash-lite",           # smaller, lower quota cost
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
+# ── Groq client (free fallback) ─────────────────────────────────────────
+# Get a FREE key at: https://console.groq.com  (14,400 req/day free)
+# Add GROQ_API_KEY=your_key to nlp-service/.env
+_groq_key = os.environ.get("GROQ_API_KEY", "")
+_groq_client = None
+if _groq_key:
+    try:
+        from groq import Groq
+        _groq_client = Groq(api_key=_groq_key)
+        print("[groq] client initialised ✔")
+    except ImportError:
+        print("[groq] groq package not installed — run: pip install groq")
+else:
+    print("[groq] GROQ_API_KEY not set — Groq fallback disabled")
+
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",   # best quality, free tier
+    "llama3-70b-8192",           # fast fallback
+    "llama3-8b-8192",            # smallest, always available
 ]
 
 BONUS_EXPANSIONS = {
@@ -120,9 +135,109 @@ class ResumeRequest(BaseModel):
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy", "models": GEMINI_MODELS}
+    return {
+        "status": "healthy",
+        "gemini_models": GEMINI_MODELS,
+        "groq_enabled": _groq_client is not None,
+        "groq_models": GROQ_MODELS if _groq_client else [],
+    }
 
 
+# ────────────────────────────────────────────────────────────────────────────────
+def call_groq(prompt: str) -> str:
+    """Call Groq LLaMA — free tier, 14,400 req/day."""
+    if not _groq_client:
+        raise RuntimeError("Groq not configured (GROQ_API_KEY missing or groq package not installed)")
+    last_err = None
+    for model in GROQ_MODELS:
+        try:
+            print(f"[groq] trying model={model}")
+            resp = _groq_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=4096,
+            )
+            text = resp.choices[0].message.content.strip()
+            print(f"[groq] success model={model}")
+            return text
+        except Exception as ex:
+            msg = str(ex)
+            last_err = ex
+            if "429" in msg or "rate_limit" in msg.lower():
+                print(f"[groq] 429 on {model}, waiting 10s")
+                time.sleep(10)
+                continue
+            else:
+                print(f"[groq] error on {model}: {ex}")
+                continue
+    raise last_err or RuntimeError("All Groq models exhausted")
+
+
+def call_ai(prompt: str) -> str:
+    """
+    Primary: Gemini (fast, high quality).
+    Fallback: Groq/LLaMA (free, 14.4k req/day) when Gemini quota exhausted.
+    """
+    gemini_exhausted = False
+    last_gemini_err = None
+
+    for attempt, model in enumerate(GEMINI_MODELS):
+        try:
+            print(f"[gemini] trying model={model}")
+            resp = gemini.models.generate_content(model=model, contents=prompt)
+            print(f"[gemini] success model={model}")
+            return resp.text.strip()
+        except Exception as ex:
+            msg = str(ex)
+            last_gemini_err = ex
+            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                # Check if daily quota is gone (limit: 0) — no point waiting
+                if "limit: 0" in msg or "GenerateRequestsPerDay" in msg:
+                    print(f"[gemini] daily quota EXHAUSTED on {model} — switching to Groq")
+                    gemini_exhausted = True
+                    break
+                delay = 10 + attempt * 5
+                m = re.search(r'retryDelay.*?(\d+)s', msg)
+                if m:
+                    delay = min(int(m.group(1)) + attempt * 3, 30)
+                print(f"[gemini] 429 on {model}, waiting {delay}s then trying next model")
+                time.sleep(delay)
+                continue
+            elif "404" in msg or "NOT_FOUND" in msg:
+                print(f"[gemini] 404 on {model} — skipping")
+                continue
+            else:
+                print(f"[gemini] error on {model}: {ex}")
+                continue
+
+    # ── Gemini failed — try Groq ──
+    if _groq_client:
+        print("[ai] Gemini unavailable — falling back to Groq/LLaMA")
+        return call_groq(prompt)
+
+    raise last_gemini_err or RuntimeError("All AI models exhausted — add GROQ_API_KEY for a free fallback")
+
+
+# Keep old name for internal use
+def call_gemini(prompt: str) -> str:
+    return call_ai(prompt)
+
+
+def strip_fences(raw: str) -> str:
+    if "```" not in raw:
+        return raw
+    parts = raw.split("```")
+    for part in parts:
+        p = part.strip()
+        if p.startswith("json"):
+            p = p[4:].strip()
+        if p.startswith("{") or p.startswith("["):
+            return p
+    return raw
+
+
+# ────────────────────────────────────────────────────────────────────────────────
 @app.post("/extract-skills", response_model=SkillsOut)
 def extract_skills(payload: TextIn):
     doc = skill_extractor.annotate(payload.text)
@@ -160,7 +275,7 @@ Job Description: {payload.description[:3000]}
 Return ONLY the JSON array:"""
 
     try:
-        raw = call_gemini(PROMPT)
+        raw = call_ai(PROMPT)
         raw = strip_fences(raw)
         parsed = json.loads(raw)
         skills = parsed if isinstance(parsed, list) else parsed.get("skills", [])
@@ -289,12 +404,12 @@ Return ONLY the JSON:"""
 
     ai_content = {}
     try:
-        raw = call_gemini(PROMPT)
+        raw = call_ai(PROMPT)
         raw = strip_fences(raw)
         ai_content = json.loads(raw)
-        print(f"[generate-resume] Gemini OK for {req.name}")
+        print(f"[generate-resume] AI OK for {req.name}")
     except Exception as ex:
-        print(f"[generate-resume] Gemini error, using raw profile data: {ex}")
+        print(f"[generate-resume] AI error, using raw profile data: {ex}")
         ai_content = {
             "summary": req.summary or "",
             "skills_line": ", ".join((req.skills or [])[:12]),
@@ -402,7 +517,7 @@ Return ONLY the JSON:"""
             set_font(role_run, size=11, bold=True)
             company_run = p.add_run(job.get('company', ''))
             set_font(company_run, size=11)
-            dates = f"{job.get('startDate','')} \u2013 {job.get('endDate','Present')}"
+            dates = f"{job.get('startDate','')} – {job.get('endDate','Present')}"
             dates_run = p.add_run(f"  |  {dates}")
             set_font(dates_run, size=10.5, color=(100, 100, 100))
             for bullet in (job.get("bullets") or []):
@@ -435,7 +550,7 @@ Return ONLY the JSON:"""
             set_font(title_run, size=11, bold=True)
             tech = proj.get('technologies', '')
             if tech:
-                tech_run = p.add_run(f"  \u2014  {tech}")
+                tech_run = p.add_run(f"  —  {tech}")
                 set_font(tech_run, size=10.5, color=(100, 100, 100))
             for bullet in (proj.get("bullets") or []):
                 if bullet:
@@ -504,58 +619,13 @@ def rx_portfolio(t):
     return hits[0] if hits else None
 
 
-def call_gemini(prompt: str) -> str:
-    """Try each model in GEMINI_MODELS.
-    - 429 RESOURCE_EXHAUSTED: exponential backoff, then try next model.
-    - 404 NOT_FOUND: skip immediately (model not available on this API key/version).
-    - Other errors: log and try next.
-    """
-    last_err = None
-    for attempt, model in enumerate(GEMINI_MODELS):
-        try:
-            print(f"[gemini] trying model={model}")
-            resp = gemini.models.generate_content(model=model, contents=prompt)
-            print(f"[gemini] success model={model}")
-            return resp.text.strip()
-        except Exception as ex:
-            msg = str(ex)
-            last_err = ex
-            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                # Parse retryDelay from error message, clamp to 30s max
-                delay = 10 + attempt * 5  # exponential: 10s, 15s, 20s
-                m = re.search(r'retryDelay.*?(\d+)s', msg)
-                if m:
-                    delay = min(int(m.group(1)) + attempt * 3, 30)
-                print(f"[gemini] 429 on {model}, waiting {delay}s then trying next model")
-                time.sleep(delay)
-                continue
-            elif "404" in msg or "NOT_FOUND" in msg:
-                print(f"[gemini] 404 on {model} — model not available, skipping")
-                continue
-            else:
-                print(f"[gemini] error on {model}: {ex}")
-                continue
-    raise last_err or RuntimeError("All Gemini models exhausted — check your GEMINI_API_KEY quota")
-
-
-def strip_fences(raw: str) -> str:
-    if "```" not in raw: return raw
-    parts = raw.split("```")
-    for part in parts:
-        p = part.strip()
-        if p.startswith("json"): p = p[4:].strip()
-        if p.startswith("{") or p.startswith("["):
-            return p
-    return raw
-
-
 @app.post("/parse-resume")
 async def parse_resume(file: UploadFile = File(...)):
     content = await file.read()
     text = pdf_to_text(content)
 
     if not text:
-        return {"error": "No text extracted \u2014 PDF may be image-based (scanned)."}
+        return {"error": "No text extracted — PDF may be image-based (scanned)."}
 
     email     = rx_email(text)
     phone     = rx_phone(text)
@@ -568,7 +638,7 @@ async def parse_resume(file: UploadFile = File(...)):
 RULES (follow strictly):
 1. Return ONLY a raw JSON object. No markdown, no triple backticks, no explanation.
 2. Use null (JSON null) for truly missing fields.
-3. Arrays must be [] if nothing found \u2014 never null.
+3. Arrays must be [] if nothing found — never null.
 4. yearsOfExp = integer (e.g. 3), not a string.
 5. skills = programming languages, frameworks, libraries, technical concepts.
 6. tools = software tools, platforms, IDEs, cloud services (Git, Docker, AWS, VS Code).
@@ -632,7 +702,7 @@ RESUME TEXT:
 
     parsed = {}
     try:
-        raw = call_gemini(PROMPT)
+        raw = call_ai(PROMPT)
         raw = strip_fences(raw)
         parsed = json.loads(raw)
     except Exception as ex:
