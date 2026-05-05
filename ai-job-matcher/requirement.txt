@@ -4,8 +4,8 @@ spacy
 skillNer
 IPython
 pdfplumber
-pdfplumber python-multipart
-google-generativeai pdfplumber
+python-multipart
+google-generativeai
 google-genai
 python-dotenv
 sentence-transformers 
