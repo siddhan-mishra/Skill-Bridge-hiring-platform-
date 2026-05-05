@@ -21,3 +21,21 @@ cd backend && npm run dev or node server.js
 
 cd ai-job-matcher/nlp-service
 uvicorn main:app --reload --port 8000
+
+## ex requirement txt
+
+fastapi
+uvicorn[standard]
+spacy
+skillNer
+IPython
+pdfplumber
+python-multipart
+google-generativeai
+google-genai
+python-dotenv
+sentence-transformers
+scikit-learn
+torch
+python-docx
+groq
