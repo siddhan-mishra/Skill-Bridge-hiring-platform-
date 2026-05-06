@@ -1,9 +1,9 @@
 import re
 import os
 import io
+import json
 import time
 import spacy
-import json
 import numpy as np
 from spacy.matcher import PhraseMatcher
 from fastapi import FastAPI, UploadFile, File
@@ -11,19 +11,57 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from skillNer.skill_extractor_class import SkillExtractor
 import pdfplumber
 from google import genai as genai_new
 from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    from skillNer.general_params import SKILL_DB
-except ImportError:
-    from skillNer.utils import load_skill_db
-    SKILL_DB = load_skill_db()
+# ── Skill DB ────────────────────────────────────────────────────────────────────
+SKILL_DB_PATH = os.path.join(os.path.dirname(__file__), "skill_db_relax_20.json")
 
+with open(SKILL_DB_PATH, "r", encoding="utf-8") as f:
+    _raw_db = json.load(f)
+
+# Build flat skill name list from the JSON structure
+_SKILL_NAMES: List[str] = []
+for entry in _raw_db.values():
+    skill_name = entry.get("skill_name") or entry.get("name")
+    if skill_name:
+        _SKILL_NAMES.append(skill_name.strip())
+
+# ── spaCy + PhraseMatcher setup ──────────────────────────────────────────────
+print("[startup] Loading spaCy model...")
+nlp = spacy.load("en_core_web_sm")
+
+print("[startup] Building PhraseMatcher from skill DB...")
+_matcher = PhraseMatcher(nlp.vocab, attr="LOWER")
+_skill_patterns: Dict[str, str] = {}  # pattern_text_lower -> canonical skill name
+
+for skill in _SKILL_NAMES:
+    key = skill.lower()
+    _skill_patterns[key] = skill
+    try:
+        pattern_doc = nlp.make_doc(skill)
+        _matcher.add(key, [pattern_doc])
+    except Exception:
+        pass
+
+print(f"[startup] PhraseMatcher ready with {len(_skill_patterns)} skills.")
+
+
+def extract_skills_from_text(text: str) -> List[str]:
+    doc = nlp(text[:50000])  # cap at 50k chars for performance
+    matches = _matcher(doc)
+    found = set()
+    for match_id, start, end in matches:
+        key = nlp.vocab.strings[match_id]
+        canonical = _skill_patterns.get(key, key)
+        found.add(canonical)
+    return sorted(found)
+
+
+# ── Lazy SBERT ───────────────────────────────────────────────────────────────────
 _sbert_model = None
 
 def get_sbert():
@@ -35,6 +73,8 @@ def get_sbert():
         print("[sbert] model loaded")
     return _sbert_model
 
+
+# ── FastAPI app ───────────────────────────────────────────────────────────────────
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -44,13 +84,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-nlp = spacy.load("en_core_web_sm")
-skill_extractor = SkillExtractor(nlp, SKILL_DB, PhraseMatcher)
-
-# ── Gemini client ────────────────────────────────────────────────────
+# ── Gemini client ─────────────────────────────────────────────────────────────────
 _gemini_key = os.environ.get("GEMINI_API_KEY")
 if not _gemini_key:
-    raise RuntimeError("GEMINI_API_KEY not set in nlp-service/.env")
+    raise RuntimeError("GEMINI_API_KEY not set in environment")
 gemini = genai_new.Client(api_key=_gemini_key)
 
 GEMINI_MODELS = [
@@ -58,9 +95,7 @@ GEMINI_MODELS = [
     "gemini-2.0-flash-lite",
 ]
 
-# ── Groq client (free fallback) ─────────────────────────────────────────
-# Get a FREE key at: https://console.groq.com  (14,400 req/day free)
-# Add GROQ_API_KEY=your_key to nlp-service/.env
+# ── Groq client ──────────────────────────────────────────────────────────────────
 _groq_key = os.environ.get("GROQ_API_KEY", "")
 _groq_client = None
 if _groq_key:
@@ -69,14 +104,14 @@ if _groq_key:
         _groq_client = Groq(api_key=_groq_key)
         print("[groq] client initialised ✔")
     except ImportError:
-        print("[groq] groq package not installed — run: pip install groq")
+        print("[groq] groq package not installed")
 else:
     print("[groq] GROQ_API_KEY not set — Groq fallback disabled")
 
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",   # best quality, free tier
-    "llama3-70b-8192",           # fast fallback
-    "llama3-8b-8192",            # smallest, always available
+    "llama-3.3-70b-versatile",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
 ]
 
 BONUS_EXPANSIONS = {
@@ -93,6 +128,7 @@ BONUS_EXPANSIONS = {
 }
 
 
+# ── Pydantic models ────────────────────────────────────────────────────────────────
 class TextIn(BaseModel):
     text: str
 
@@ -133,6 +169,7 @@ class ResumeRequest(BaseModel):
     yearsOfExp:    Optional[int] = 0
 
 
+# ── Health check ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
     return {
@@ -140,14 +177,14 @@ def health_check():
         "gemini_models": GEMINI_MODELS,
         "groq_enabled": _groq_client is not None,
         "groq_models": GROQ_MODELS if _groq_client else [],
+        "skill_db_size": len(_skill_patterns),
     }
 
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ── AI helpers ───────────────────────────────────────────────────────────────────
 def call_groq(prompt: str) -> str:
-    """Call Groq LLaMA — free tier, 14,400 req/day."""
     if not _groq_client:
-        raise RuntimeError("Groq not configured (GROQ_API_KEY missing or groq package not installed)")
+        raise RuntimeError("Groq not configured")
     last_err = None
     for model in GROQ_MODELS:
         try:
@@ -158,30 +195,20 @@ def call_groq(prompt: str) -> str:
                 temperature=0.1,
                 max_tokens=4096,
             )
-            text = resp.choices[0].message.content.strip()
-            print(f"[groq] success model={model}")
-            return text
+            return resp.choices[0].message.content.strip()
         except Exception as ex:
             msg = str(ex)
             last_err = ex
             if "429" in msg or "rate_limit" in msg.lower():
                 print(f"[groq] 429 on {model}, waiting 10s")
                 time.sleep(10)
-                continue
             else:
                 print(f"[groq] error on {model}: {ex}")
-                continue
     raise last_err or RuntimeError("All Groq models exhausted")
 
 
 def call_ai(prompt: str) -> str:
-    """
-    Primary: Gemini (fast, high quality).
-    Fallback: Groq/LLaMA (free, 14.4k req/day) when Gemini quota exhausted.
-    """
-    gemini_exhausted = False
     last_gemini_err = None
-
     for attempt, model in enumerate(GEMINI_MODELS):
         try:
             print(f"[gemini] trying model={model}")
@@ -192,34 +219,25 @@ def call_ai(prompt: str) -> str:
             msg = str(ex)
             last_gemini_err = ex
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                # Check if daily quota is gone (limit: 0) — no point waiting
                 if "limit: 0" in msg or "GenerateRequestsPerDay" in msg:
-                    print(f"[gemini] daily quota EXHAUSTED on {model} — switching to Groq")
-                    gemini_exhausted = True
+                    print(f"[gemini] daily quota EXHAUSTED — switching to Groq")
                     break
                 delay = 10 + attempt * 5
                 m = re.search(r'retryDelay.*?(\d+)s', msg)
                 if m:
                     delay = min(int(m.group(1)) + attempt * 3, 30)
-                print(f"[gemini] 429 on {model}, waiting {delay}s then trying next model")
+                print(f"[gemini] 429 on {model}, waiting {delay}s")
                 time.sleep(delay)
-                continue
             elif "404" in msg or "NOT_FOUND" in msg:
                 print(f"[gemini] 404 on {model} — skipping")
-                continue
             else:
                 print(f"[gemini] error on {model}: {ex}")
-                continue
-
-    # ── Gemini failed — try Groq ──
     if _groq_client:
         print("[ai] Gemini unavailable — falling back to Groq/LLaMA")
         return call_groq(prompt)
+    raise last_gemini_err or RuntimeError("All AI models exhausted")
 
-    raise last_gemini_err or RuntimeError("All AI models exhausted — add GROQ_API_KEY for a free fallback")
 
-
-# Keep old name for internal use
 def call_gemini(prompt: str) -> str:
     return call_ai(prompt)
 
@@ -237,19 +255,11 @@ def strip_fences(raw: str) -> str:
     return raw
 
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ── Routes ───────────────────────────────────────────────────────────────────────
 @app.post("/extract-skills", response_model=SkillsOut)
 def extract_skills(payload: TextIn):
-    doc = skill_extractor.annotate(payload.text)
-    results = doc.get("results", {})
-    skills = set()
-    for key in ["full_matches", "ngram_scored_filtered", "ngram_scored", "keyword_scored"]:
-        for item in (results.get(key) or []):
-            if isinstance(item, dict):
-                name = item.get("skill_name") or item.get("doc_node_value")
-                if name:
-                    skills.add(name.strip())
-    return {"skills": sorted(skills)}
+    skills = extract_skills_from_text(payload.text)
+    return {"skills": skills}
 
 
 @app.post("/suggest-skills")
@@ -336,7 +346,6 @@ async def compute_match(req: MatchRequest):
 
         edu_score = req.educationMatch
         structured_score = (exp_score * 0.6) + (edu_score * 0.4)
-
         final_raw = (0.40 * sbert_score + 0.40 * skill_score + 0.20 * structured_score)
         final_pct = round(final_raw * 100)
 
@@ -420,7 +429,8 @@ Return ONLY the JSON:"""
                 for w in (req.workHistory or [])
             ],
             "projects": [
-                {"title": p.get("title",""), "technologies": ", ".join(p.get("technologies",[]) if isinstance(p.get("technologies"), list) else [p.get("technologies","")]),
+                {"title": p.get("title",""),
+                 "technologies": ", ".join(p.get("technologies",[]) if isinstance(p.get("technologies"), list) else [p.get("technologies","")]),
                  "bullets": [p.get("description","")]}
                 for p in (req.projects or [])
             ],
@@ -433,7 +443,6 @@ Return ONLY the JSON:"""
     from docx.oxml import OxmlElement
 
     doc = Document()
-
     for section in doc.sections:
         section.top_margin    = Inches(1)
         section.bottom_margin = Inches(1)
@@ -586,6 +595,7 @@ Return ONLY the JSON:"""
     )
 
 
+# ── Utilities ─────────────────────────────────────────────────────────────────────
 def _fuzzy(a: str, b: str) -> bool:
     if a == b: return True
     if len(a) <= 3 or len(b) <= 3: return False
