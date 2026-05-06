@@ -1,10 +1,20 @@
 import axios from 'axios';
 
-// Unified base — reads VITE_API_BASE (set in .env as VITE_API_BASE=http://localhost:5000)
+// Reads VITE_API_BASE injected by Vite at build time.
+// In production (Vercel), this comes from .env.production or Vercel env vars.
+// In local dev, set VITE_API_BASE=http://localhost:5000 in .env
+const BASE = import.meta.env.VITE_API_BASE;
+
+if (!BASE) {
+  console.warn(
+    '[jobApi] VITE_API_BASE is not set. ' +
+    'All API calls will fail. ' +
+    'Set VITE_API_BASE in .env.production (Vercel) or .env (local).'
+  );
+}
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE
-    ? `${import.meta.env.VITE_API_BASE}/api`
-    : 'http://localhost:5000/api',
+  baseURL: BASE ? `${BASE}/api` : '',
 });
 
 // Auto-attach auth token to every request
@@ -46,7 +56,6 @@ export const getAppsForJob       = (jobId)        => API.get(`/applications/job/
 export const updateAppStatus     = (appId, data)  => API.put(`/applications/${appId}/status`, data);
 
 // ── Matching ──────────────────────────────────────────────────────────────────
-// NOTE: server mounts matchRoutes at /api/matches
 export const getMatchedJobs   = ()       => API.get('/matches/jobs');
 export const getCandidates    = (jobId)  => API.get(`/matches/candidates/${jobId}`);
 export const getJobMatchScore = (jobId)  => API.get(`/matches/job/${jobId}`);
