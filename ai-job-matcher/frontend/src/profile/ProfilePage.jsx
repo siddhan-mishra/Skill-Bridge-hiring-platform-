@@ -56,9 +56,244 @@ const EMPTY = {
 
 function F({ label, children }) {
   return (
-    <div style={{ marginBottom: '0.85rem' }}>
-      <label style={S.lbl}>{label}</label>
-      {children}
+
+    <div className="card">
+      <h2>Your Profile</h2>
+
+      {/* Line 187: status messages */}
+      {error   && <p style={{ color: 'tomato',      padding: '0.5rem', background: '#2a0000', borderRadius: '4px' }}>{error}</p>}
+      {message && <p style={{ color: 'lightgreen',  padding: '0.5rem', background: '#002a00', borderRadius: '4px' }}>{message}</p>}
+
+      <form onSubmit={handleSubmit} style={{ maxWidth: 700, marginTop: '1rem' }}>
+
+        {/* ── Headline ── */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label>Headline</label>
+          <input
+            type="text"
+            name="headline"
+            value={form.headline}
+            onChange={handleChange}
+            placeholder="e.g. MERN Stack Developer | Open to work"
+            style={inputStyle}
+          />
+        </div>
+
+        {/* ── Summary ── */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label>Summary</label>
+          <textarea
+            name="summary"
+            value={form.summary}
+            onChange={handleChange}
+            rows={4}
+            placeholder="Write about yourself, your experience, and what you're looking for..."
+            style={inputStyle}
+          />
+        </div>
+
+        {/* ── Skills ── */}
+        <div style={{ marginBottom: '1rem' }}>
+          <label>Skills (comma-separated)</label>
+          <input
+            type="text"
+            name="skills"
+            value={form.skills}
+            onChange={handleChange}
+            placeholder="React, Node.js, Python, MongoDB..."
+            style={inputStyle}
+          />
+          <button
+            type="button"
+            onClick={handleExtractSkills}
+            style={{ marginTop: '0.5rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
+          >
+            🤖 Extract skills from summary
+          </button>
+        </div>
+
+        {/* ── Education ── */}
+        <h3 style={{ marginBottom: '0.75rem' }}>Education</h3>
+        {form.education.map((edu, idx) => (
+          <div
+            key={idx}
+            style={{
+              marginBottom: '1rem',
+              padding: '0.75rem',
+              border: '1px solid #333',
+              borderRadius: '4px',
+              background: '#161616',
+            }}
+          >
+            {/* Line 230: row header with remove button */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <strong style={{ fontSize: '0.9rem', color: '#aaa' }}>Education #{idx + 1}</strong>
+              {form.education.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => removeEducation(idx)}
+                  style={removeBtnStyle}
+                >
+                  ✕ Remove
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: '0.5rem' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Degree</label>
+                <input
+                  type="text"
+                  placeholder="B.Tech CSE"
+                  value={edu.degree}
+                  onChange={(e) => handleEducationChange(idx, 'degree', e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Institute</label>
+                <input
+                  type="text"
+                  placeholder="XYZ University"
+                  value={edu.institute}
+                  onChange={(e) => handleEducationChange(idx, 'institute', e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Year</label>
+                <input
+                  type="text"
+                  placeholder="2024"
+                  value={edu.year}
+                  onChange={(e) => handleEducationChange(idx, 'year', e.target.value)}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addEducation}
+          style={{ marginBottom: '1.5rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
+        >
+          + Add Education
+        </button>
+
+        {/* ── Projects ── */}
+        <h3 style={{ marginBottom: '0.75rem' }}>Projects</h3>
+        {form.projects.map((pr, idx) => (
+          <div
+            key={idx}
+            style={{
+              marginBottom: '1rem',
+              padding: '0.75rem',
+              border: '1px solid #333',
+              borderRadius: '4px',
+              background: '#161616',
+            }}
+          >
+            {/* Line 280: row header with remove button */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <strong style={{ fontSize: '0.9rem', color: '#aaa' }}>Project #{idx + 1}</strong>
+              {form.projects.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => removeProject(idx)}
+                  style={removeBtnStyle}
+                >
+                  ✕ Remove
+                </button>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '0.5rem' }}>
+              <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Title</label>
+              <input
+                type="text"
+                placeholder="SkillBridge — AI Job Matcher"
+                value={pr.title}
+                onChange={(e) => handleProjectChange(idx, 'title', e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ marginBottom: '0.5rem' }}>
+              <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Description</label>
+              <textarea
+                placeholder="What does this project do?"
+                value={pr.description}
+                onChange={(e) => handleProjectChange(idx, 'description', e.target.value)}
+                rows={2}
+                style={inputStyle}
+              />
+            </div>
+            <div style={{ marginBottom: '0.5rem' }}>
+              <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Technologies (comma-separated)</label>
+              <input
+                type="text"
+                placeholder="React, Node.js, MongoDB"
+                value={pr.technologies}
+                onChange={(e) => handleProjectChange(idx, 'technologies', e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.8rem', color: '#aaa' }}>Link (GitHub / demo)</label>
+              <input
+                type="text"
+                placeholder="https://github.com/..."
+                value={pr.link}
+                onChange={(e) => handleProjectChange(idx, 'link', e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addProject}
+          style={{ marginBottom: '1.5rem', padding: '0.4rem 0.8rem', cursor: 'pointer' }}
+        >
+          + Add Project
+        </button>
+
+        {/* ── Action buttons ── */}
+        {/* Line 330: Save + Reset side by side */}
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+          <button
+            type="submit"
+            disabled={saving}
+            style={{
+              padding: '0.5rem 1.5rem',
+              background: saving ? '#555' : '#2a6496',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {saving ? 'Saving...' : '💾 Save Profile'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={!savedForm}
+            style={{
+              padding: '0.5rem 1.2rem',
+              background: '#444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            ↩ Discard Changes
+          </button>
+        </div>
+
+      </form>
     </div>
   );
 }

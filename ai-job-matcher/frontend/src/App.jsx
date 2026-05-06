@@ -36,7 +36,6 @@ function Navbar() {
             <Link to="/profile"      className="app-nav-link">Profile</Link>
           </>
         )}
-
         {user?.role === 'recruiter' && (
           <>
             <Link to="/recruiter/dashboard"    className="app-nav-link">Dashboard</Link>
@@ -46,7 +45,6 @@ function Navbar() {
           </>
         )}
       </div>
-
       <div className="app-nav-right">
         {isAuthenticated && user ? (
           <>
