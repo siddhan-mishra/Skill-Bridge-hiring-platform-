@@ -5,9 +5,8 @@ set -e
 PORT="${PORT:-10000}"
 
 echo "[start] Launching uvicorn on port $PORT"
-# Use --timeout-keep-alive 75 to keep connections alive longer
-# Do NOT use --reload in production — it adds startup delay
-exec .venv/bin/uvicorn main:app \
+# render-build.sh installs into system Python (no .venv), so use uvicorn from PATH
+exec uvicorn main:app \
   --host 0.0.0.0 \
   --port "$PORT" \
   --workers 1 \
