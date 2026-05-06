@@ -7,20 +7,21 @@ python --version
 echo "==> Upgrading pip..."
 pip install --upgrade pip
 
-echo "==> Installing numpy + pandas (binary only)"
+echo "==> [1/5] Installing numpy + pandas (binary wheels only — no C compilation)"
 pip install --prefer-binary "numpy>=1.26,<3" "pandas>=2.0,<3"
 
-echo "==> Installing spacy with binary only"
+echo "==> [2/5] Installing spacy (binary wheels only)"
 pip install --prefer-binary "spacy>=3.5,<3.8"
 
-echo "==> Downloading spacy model"
+echo "==> [3/5] Downloading spacy language model"
 python -m spacy download en_core_web_sm
 
-echo "==> Installing skillNer"
-pip install skillNer==1.0.3 --no-deps
+echo "==> [4/5] Installing skillNer (latest = 1.0.3)"
+pip install "skillNer==1.0.3" --no-deps
 pip install requests jsonschema
 
-echo "==> Installing remaining requirements"
+echo "==> [5/5] Installing all remaining requirements"
 pip install --prefer-binary -r requirements.txt
 
-echo "==> Build complete!"
+echo ""
+echo "==> Build complete! All packages installed."

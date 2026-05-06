@@ -1,23 +1,27 @@
-# Core API
+# ── Core API ──────────────────────────────────────────────────────────────────
 fastapi==0.115.0
-uvicorn==0.30.6
+uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 python-dotenv==1.0.1
 pydantic==2.8.2
 
-# PDF parsing
+# ── PDF parsing ───────────────────────────────────────────────────────────────
 pdfplumber==0.11.4
 
-# ML / Embeddings (numpy+pandas+spacy installed via render-build.sh)
+# ── ML / Embeddings ───────────────────────────────────────────────────────────
+# numpy, pandas, spacy installed via render-build.sh (needs --prefer-binary flag)
 scikit-learn>=1.3,<2
 sentence-transformers>=2.7,<4
+# NOTE: torch is auto-installed by sentence-transformers. Do NOT add separately (2GB+)
 
-# Document generation
-python-docx==1.1.2
+# ── Document generation ───────────────────────────────────────────────────────
+python-docx>=1.1
 
-# AI providers
+# ── AI providers ──────────────────────────────────────────────────────────────
 google-genai>=1.5
 groq>=0.9
 
-# HTTP
+# ── HTTP + utilities ──────────────────────────────────────────────────────────
 httpx>=0.27
+requests>=2.31
+jsonschema>=4.0
