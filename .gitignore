@@ -1,7 +1,7 @@
-# Check .gitignore has these lines:
-frontend/.env
-backend/.env
-nlp-service/.env
+# Clear everything out of any subfolder named .env
+**/.env
 node_modules/
 venv/
 __pycache__/
+backend/node_modules/
+venv/
