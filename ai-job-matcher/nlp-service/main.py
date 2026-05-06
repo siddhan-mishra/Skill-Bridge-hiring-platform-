@@ -12,7 +12,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import pdfplumber
-from google import genai as genai_new
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,20 +22,19 @@ SKILL_DB_PATH = os.path.join(os.path.dirname(__file__), "skill_db_relax_20.json"
 with open(SKILL_DB_PATH, "r", encoding="utf-8") as f:
     _raw_db = json.load(f)
 
-# Build flat skill name list from the JSON structure
 _SKILL_NAMES: List[str] = []
 for entry in _raw_db.values():
     skill_name = entry.get("skill_name") or entry.get("name")
     if skill_name:
         _SKILL_NAMES.append(skill_name.strip())
 
-# ── spaCy + PhraseMatcher setup ──────────────────────────────────────────────
+# ── spaCy + PhraseMatcher ────────────────────────────────────────────────────────
 print("[startup] Loading spaCy model...")
 nlp = spacy.load("en_core_web_sm")
 
 print("[startup] Building PhraseMatcher from skill DB...")
 _matcher = PhraseMatcher(nlp.vocab, attr="LOWER")
-_skill_patterns: Dict[str, str] = {}  # pattern_text_lower -> canonical skill name
+_skill_patterns: Dict[str, str] = {}
 
 for skill in _SKILL_NAMES:
     key = skill.lower()
@@ -51,7 +49,7 @@ print(f"[startup] PhraseMatcher ready with {len(_skill_patterns)} skills.")
 
 
 def extract_skills_from_text(text: str) -> List[str]:
-    doc = nlp(text[:50000])  # cap at 50k chars for performance
+    doc = nlp(text[:50000])
     matches = _matcher(doc)
     found = set()
     for match_id, start, end in matches:
@@ -84,11 +82,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Gemini client ─────────────────────────────────────────────────────────────────
-_gemini_key = os.environ.get("GEMINI_API_KEY")
-if not _gemini_key:
-    raise RuntimeError("GEMINI_API_KEY not set in environment")
-gemini = genai_new.Client(api_key=_gemini_key)
+# ── Gemini client — GRACEFUL, no hard crash ───────────────────────────────────────
+_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+gemini = None
+if _gemini_key:
+    try:
+        from google import genai as genai_new
+        gemini = genai_new.Client(api_key=_gemini_key)
+        print("[gemini] client initialised ✔")
+    except Exception as e:
+        print(f"[gemini] init failed: {e}")
+else:
+    print("[gemini] WARNING: GEMINI_API_KEY not set — AI features disabled")
 
 GEMINI_MODELS = [
     "gemini-2.0-flash",
@@ -174,6 +179,7 @@ class ResumeRequest(BaseModel):
 def health_check():
     return {
         "status": "healthy",
+        "gemini_ready": gemini is not None,
         "gemini_models": GEMINI_MODELS,
         "groq_enabled": _groq_client is not None,
         "groq_models": GROQ_MODELS if _groq_client else [],
@@ -208,30 +214,33 @@ def call_groq(prompt: str) -> str:
 
 
 def call_ai(prompt: str) -> str:
+    if gemini is None and _groq_client is None:
+        raise RuntimeError("No AI provider configured. Set GEMINI_API_KEY or GROQ_API_KEY.")
     last_gemini_err = None
-    for attempt, model in enumerate(GEMINI_MODELS):
-        try:
-            print(f"[gemini] trying model={model}")
-            resp = gemini.models.generate_content(model=model, contents=prompt)
-            print(f"[gemini] success model={model}")
-            return resp.text.strip()
-        except Exception as ex:
-            msg = str(ex)
-            last_gemini_err = ex
-            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                if "limit: 0" in msg or "GenerateRequestsPerDay" in msg:
-                    print(f"[gemini] daily quota EXHAUSTED — switching to Groq")
-                    break
-                delay = 10 + attempt * 5
-                m = re.search(r'retryDelay.*?(\d+)s', msg)
-                if m:
-                    delay = min(int(m.group(1)) + attempt * 3, 30)
-                print(f"[gemini] 429 on {model}, waiting {delay}s")
-                time.sleep(delay)
-            elif "404" in msg or "NOT_FOUND" in msg:
-                print(f"[gemini] 404 on {model} — skipping")
-            else:
-                print(f"[gemini] error on {model}: {ex}")
+    if gemini is not None:
+        for attempt, model in enumerate(GEMINI_MODELS):
+            try:
+                print(f"[gemini] trying model={model}")
+                resp = gemini.models.generate_content(model=model, contents=prompt)
+                print(f"[gemini] success model={model}")
+                return resp.text.strip()
+            except Exception as ex:
+                msg = str(ex)
+                last_gemini_err = ex
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    if "limit: 0" in msg or "GenerateRequestsPerDay" in msg:
+                        print(f"[gemini] daily quota EXHAUSTED — switching to Groq")
+                        break
+                    delay = 10 + attempt * 5
+                    m = re.search(r'retryDelay.*(\d+)s', msg)
+                    if m:
+                        delay = min(int(m.group(1)) + attempt * 3, 30)
+                    print(f"[gemini] 429 on {model}, waiting {delay}s")
+                    time.sleep(delay)
+                elif "404" in msg or "NOT_FOUND" in msg:
+                    print(f"[gemini] 404 on {model} — skipping")
+                else:
+                    print(f"[gemini] error on {model}: {ex}")
     if _groq_client:
         print("[ai] Gemini unavailable — falling back to Groq/LLaMA")
         return call_groq(prompt)
@@ -349,7 +358,7 @@ async def compute_match(req: MatchRequest):
         final_raw = (0.40 * sbert_score + 0.40 * skill_score + 0.20 * structured_score)
         final_pct = round(final_raw * 100)
 
-        print(f"[compute-match] sbert={sbert_score:.3f} skill={skill_score:.3f} struct={structured_score:.3f} → {final_pct}%")
+        print(f"[compute-match] sbert={sbert_score:.3f} skill={skill_score:.3f} struct={structured_score:.3f} -> {final_pct}%")
 
         return {
             "score": final_pct,
@@ -385,26 +394,7 @@ RULES:
 7. Do NOT invent companies, dates, or facts not in the profile.
 
 EXACT OUTPUT FORMAT:
-{{
-  "summary": "Experienced full-stack developer...",
-  "skills_line": "JavaScript, React, Node.js, Python, MongoDB, Docker, AWS, Git",
-  "workHistory": [
-    {{
-      "role": "Software Engineer",
-      "company": "Google",
-      "startDate": "Jan 2021",
-      "endDate": "Present",
-      "bullets": ["Built REST APIs handling 10M+ daily requests", "Reduced deployment time by 60%"]
-    }}
-  ],
-  "projects": [
-    {{
-      "title": "SkillBridge",
-      "technologies": "React, Node.js, MongoDB",
-      "bullets": ["Engineered AI matching engine with 85% accuracy"]
-    }}
-  ]
-}}
+{{"summary": "...", "skills_line": "...", "workHistory": [], "projects": []}}
 
 RAW PROFILE:
 {json.dumps(profile_json, indent=2)[:6000]}
@@ -526,7 +516,7 @@ Return ONLY the JSON:"""
             set_font(role_run, size=11, bold=True)
             company_run = p.add_run(job.get('company', ''))
             set_font(company_run, size=11)
-            dates = f"{job.get('startDate','')} – {job.get('endDate','Present')}"
+            dates = f"{job.get('startDate','')} - {job.get('endDate','Present')}"
             dates_run = p.add_run(f"  |  {dates}")
             set_font(dates_run, size=10.5, color=(100, 100, 100))
             for bullet in (job.get("bullets") or []):
@@ -559,7 +549,7 @@ Return ONLY the JSON:"""
             set_font(title_run, size=11, bold=True)
             tech = proj.get('technologies', '')
             if tech:
-                tech_run = p.add_run(f"  —  {tech}")
+                tech_run = p.add_run(f"  -  {tech}")
                 set_font(tech_run, size=10.5, color=(100, 100, 100))
             for bullet in (proj.get("bullets") or []):
                 if bullet:
@@ -645,65 +635,14 @@ async def parse_resume(file: UploadFile = File(...)):
 
     PROMPT = f"""You are an expert resume parser. Extract structured data from the resume below.
 
-RULES (follow strictly):
-1. Return ONLY a raw JSON object. No markdown, no triple backticks, no explanation.
-2. Use null (JSON null) for truly missing fields.
-3. Arrays must be [] if nothing found — never null.
-4. yearsOfExp = integer (e.g. 3), not a string.
-5. skills = programming languages, frameworks, libraries, technical concepts.
-6. tools = software tools, platforms, IDEs, cloud services (Git, Docker, AWS, VS Code).
-7. achievements = list of bullet strings from job description.
-8. education year = 4-digit graduation year string e.g. "2024".
-9. workHistory endDate = "Present" if currently working there.
+RULES:
+1. Return ONLY a raw JSON object. No markdown, no triple backticks.
+2. Use null for missing fields. Arrays must be [] if nothing found.
+3. yearsOfExp = integer. skills = tech skills. tools = software/platforms.
 
 EXACT OUTPUT FORMAT:
-{{
-  "fullName": "Jane Smith",
-  "headline": "Full Stack Developer with 3 years experience",
-  "summary": "Experienced developer specializing in MERN stack...",
-  "currentTitle": "Software Engineer",
-  "currentCompany": "Google",
-  "yearsOfExp": 3,
-  "skills": ["JavaScript", "React", "Node.js", "Python", "MongoDB"],
-  "tools": ["Git", "Docker", "VS Code", "Postman", "AWS"],
-  "workHistory": [
-    {{
-      "role": "Software Engineer",
-      "company": "Google",
-      "startDate": "Jan 2021",
-      "endDate": "Present",
-      "achievements": [
-        "Built REST APIs serving 10M+ requests/day",
-        "Reduced page load time by 40%"
-      ]
-    }}
-  ],
-  "education": [
-    {{
-      "degree": "B.Tech Computer Science",
-      "institute": "KIIT University",
-      "year": "2021",
-      "gpa": "8.5"
-    }}
-  ],
-  "certifications": [
-    {{
-      "name": "AWS Solutions Architect",
-      "issuer": "Amazon",
-      "year": "2022",
-      "link": ""
-    }}
-  ],
-  "languages": ["English", "Hindi"],
-  "projects": [
-    {{
-      "title": "SkillBridge",
-      "description": "AI-powered job matching platform",
-      "technologies": ["React", "Node.js", "MongoDB"],
-      "link": "https://github.com/user/skillbridge"
-    }}
-  ]
-}}
+{{"fullName":"Jane Smith","headline":"...","summary":"...","currentTitle":"...","currentCompany":"...",
+"yearsOfExp":3,"skills":[],"tools":[],"workHistory":[],"education":[],"certifications":[],"languages":[],"projects":[]}}
 
 RESUME TEXT:
 ---
