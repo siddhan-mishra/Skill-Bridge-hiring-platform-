@@ -8,13 +8,11 @@ pydantic==2.8.2
 # PDF parsing
 pdfplumber==0.11.4
 
-# NLP — pinned to versions with Python 3.11 binary wheels
-spacy==3.7.6
-skillNer==1.0.6
+# NLP — installed via build command with --only-binary to avoid C compilation
+# spacy and skillNer are handled in the build command directly
 
-# ML / Embeddings — pinned binary wheel versions
+# ML / Embeddings
 numpy==1.26.4
-pandas==2.2.2
 scikit-learn==1.5.1
 sentence-transformers==3.0.1
 
