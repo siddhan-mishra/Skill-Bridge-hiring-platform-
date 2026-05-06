@@ -68,7 +68,10 @@ function Navbar() {
 function OwnProfileRedirect() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" />;
-  return <Navigate to={`/profile/${user.id}`} replace />;
+  // user._id from MongoDB, user.id from JWT — support both
+  const uid = user._id || user.id;
+  if (!uid) return <Navigate to="/login" />;
+  return <Navigate to={`/profile/${uid}`} replace />;
 }
 
 function AppRoutes() {
@@ -88,7 +91,7 @@ function AppRoutes() {
       <Route path="/applications" element={<ProfileGuard><ApplicationsPage /></ProfileGuard>} />
 
       {/* Profile */}
-      <Route path="/profile/edit"   element={<ProfilePage />} />
+      <Route path="/profile/edit"    element={<ProfilePage />} />
       <Route path="/profile/:userId" element={<PublicProfilePage />} />
       <Route path="/profile"         element={<OwnProfileRedirect />} />
 

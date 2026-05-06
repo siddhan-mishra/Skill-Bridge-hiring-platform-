@@ -3,6 +3,7 @@ import os
 import io
 import json
 import time
+import asyncio
 import spacy
 import numpy as np
 from spacy.matcher import PhraseMatcher
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import pdfplumber
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
 load_dotenv()
 
@@ -59,8 +61,9 @@ def extract_skills_from_text(text: str) -> List[str]:
     return sorted(found)
 
 
-# ── Lazy SBERT ───────────────────────────────────────────────────────────────────
+# ── Lazy SBERT (loaded in background after startup) ───────────────────────────────
 _sbert_model = None
+_sbert_ready = False
 
 def get_sbert():
     global _sbert_model
@@ -72,8 +75,30 @@ def get_sbert():
     return _sbert_model
 
 
+async def _preload_sbert_background():
+    """Load SBERT in a thread so it doesn't block the event loop or port binding."""
+    global _sbert_ready
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, get_sbert)
+        _sbert_ready = True
+        print("[sbert] background preload complete")
+    except Exception as e:
+        print(f"[sbert] background preload failed: {e}")
+
+
+# ── Lifespan: bind port immediately, load heavy models in background ──────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Server is up and port is bound — start heavy loading in background
+    print("[lifespan] Server ready. Starting background model preload...")
+    asyncio.create_task(_preload_sbert_background())
+    yield
+    print("[lifespan] Shutting down.")
+
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────────
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -184,6 +209,7 @@ def health_check():
         "groq_enabled": _groq_client is not None,
         "groq_models": GROQ_MODELS if _groq_client else [],
         "skill_db_size": len(_skill_patterns),
+        "sbert_ready": _sbert_ready,
     }
 
 
