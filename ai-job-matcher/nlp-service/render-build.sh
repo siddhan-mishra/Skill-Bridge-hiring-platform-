@@ -16,9 +16,9 @@ pip install --prefer-binary "spacy>=3.5,<3.8"
 echo "==> [3/5] Downloading spacy language model"
 python -m spacy download en_core_web_sm
 
-echo "==> [4/5] Installing skillNer (latest = 1.0.3)"
-pip install "skillNer==1.0.3" --no-deps
-pip install requests jsonschema
+echo "==> [4/5] Installing skillNer with all dependencies (needs nltk)"
+pip install "skillNer==1.0.3"
+python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt'); nltk.download('punkt_tab')"
 
 echo "==> [5/5] Installing all remaining requirements"
 pip install --prefer-binary -r requirements.txt
